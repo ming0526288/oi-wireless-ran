@@ -1933,7 +1933,7 @@ static void pf_ul(module_id_t module_id,
                                                         deltaMCS,
                                                         false);
       if (sched_pusch->mcs != 9)
-      LOG_I(NR_MAC,
+      LOG_D(NR_MAC,
             "pf_ul %d.%d UE %x Scheduling PUSCH (no data) nrb %d mcs %d tbs %d bits phr_txpower %d\n",
             frame,
             slot,
