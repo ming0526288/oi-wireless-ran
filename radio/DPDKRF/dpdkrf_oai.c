@@ -57,7 +57,7 @@ static int64_t freq_tx  = -1;
 static int64_t freq_rx  = -1;
 static int64_t freq_offset  = 0;
 //int64_t freq_air = 6000000000;//5.9g
-int64_t freq_air = 3349380000;
+//int64_t freq_air = 3349380000;
 int32_t test_dpdkrf_read (openair0_device *device, openair0_timestamp *ptimestamp, void **buff1, int nsamps, int cc){
 
 	void *buff[4];
@@ -134,7 +134,7 @@ int trx_dpdkrf_start(openair0_device *device) {
     sleep(2);
     openair0_cfg = device->openair0_cfg;
 #if 1
-	dpdk_device_start(3,4, 5000, openair0_cfg->tx_num_channels, openair0_cfg->rx_num_channels, g_rate, 0);
+	dpdk_device_start(3,4, 5000, openair0_cfg->tx_num_channels, openair0_cfg->rx_num_channels, g_rate, 1);
     //printf("tx txbase %p, txbase[0] %p, &txbase[0][0] %p,  rx addr %p ,rxbase[0] %p, &rxbase[0][0] %p\n", 
     //openair0_cfg->txbase, 
     //openair0_cfg->txbase[0],
@@ -147,12 +147,12 @@ int trx_dpdkrf_start(openair0_device *device) {
     //printf("trx_dpdkrf_start FREQ NOT SET!!!!!!!\n\n\n\n\n\n\n\n\n\n\n\n");
 	//trx_dpdkrf_getInfo(0);
     //sleep(1);
-    freq_tx = (int64_t)openair0_cfg->tx_freq[0];
-    freq_rx = (int64_t)openair0_cfg->rx_freq[0];       
+    //freq_tx = (int64_t)openair0_cfg->tx_freq[0];
+    //freq_rx = (int64_t)openair0_cfg->rx_freq[0];       
 
-    //trx_dpdkrf_setFreq((int64_t)openair0_cfg->rx_freq[0], (int64_t)openair0_cfg->tx_freq[0], 0);
-    trx_dpdkrf_setFreq(freq_air, freq_air, 0);
-    printf("set freq = %ld %ld, freq_air %ld\n\n",(int64_t)(openair0_cfg->rx_freq[0]), (int64_t)(openair0_cfg->tx_freq[0]), freq_air);
+    trx_dpdkrf_setFreq((int64_t)openair0_cfg->rx_freq[0], (int64_t)openair0_cfg->tx_freq[0], 0);
+    //trx_dpdkrf_setFreq(freq_air, freq_air, 0);
+    //printf("set freq = %ld %ld, freq_air %ld\n\n",(int64_t)(openair0_cfg->rx_freq[0]), (int64_t)(openair0_cfg->tx_freq[0]), freq_air);
     //sleep(1);
 
     //int64_t txgetfreq, rxgetfreq;
@@ -186,14 +186,14 @@ int trx_dpdkrf_set_freq(openair0_device* device, openair0_config_t *openair0_cfg
 	// txpCtrl[0] = (uint8_t *)gTxCtrlBuf;
 	// trx_dpdkrf_write_ctrl(txpCtrl);
 
-    freq_offset += (openair0_cfg->rx_freq[0] - freq_rx);
-    freq_rx = openair0_cfg->rx_freq[0]; 
+    //freq_offset += (openair0_cfg->rx_freq[0] - freq_rx);
+   // freq_rx = openair0_cfg->rx_freq[0]; 
 
-    freq_air += freq_offset;
+    //freq_air += freq_offset;
 
-    printf("trx_dpdkrf_set_freq in air %ld, offset %ld\n", freq_air, freq_offset);
-    //trx_dpdkrf_setFreq((int64_t)openair0_cfg->rx_freq[0], (int64_t)openair0_cfg->tx_freq[0], 0);
-    trx_dpdkrf_setFreq(freq_air, freq_air, 0);       
+    //printf("trx_dpdkrf_set_freq in air %ld, offset %ld\n", freq_air, freq_offset);
+    trx_dpdkrf_setFreq((int64_t)openair0_cfg->rx_freq[0], (int64_t)openair0_cfg->tx_freq[0], 0);
+    //trx_dpdkrf_setFreq(freq_air, freq_air, 0);       
     return(0);
 }
 int trx_dpdkrf_set_gains(openair0_device* device, openair0_config_t *openair0_cfg) {

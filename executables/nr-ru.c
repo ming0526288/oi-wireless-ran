@@ -878,7 +878,7 @@ static void fill_rf_config(RU_t *ru, char *rf_config_file)
   cfg->num_rb_dl=N_RB;
   cfg->tx_num_channels=ru->nb_tx;
   cfg->rx_num_channels=ru->nb_rx;
-  LOG_I(PHY,"Setting RF config for N_RB %d, NB_RX %d, NB_TX %d\n",cfg->num_rb_dl,cfg->rx_num_channels,cfg->tx_num_channels);
+  LOG_I(PHY,"Setting RF config for N_RB %d, NB_RX %d, NB_TX %d, if_frequency %lu\n",cfg->num_rb_dl,cfg->rx_num_channels,cfg->tx_num_channels, ru->if_frequency);
   LOG_I(PHY,"tune_offset %.0f Hz, sample_rate %.0f Hz\n",cfg->tune_offset,cfg->sample_rate);
 
   for (i=0; i<ru->nb_tx; i++) {
@@ -2072,7 +2072,7 @@ static void NRRCconfig_RU(configmodule_interface_t *cfg)
       RC.ru[j]->nb_rx                             = *(RUParamList.paramarray[j][RU_NB_RX_IDX].uptr);
       RC.ru[j]->att_tx                            = *(RUParamList.paramarray[j][RU_ATT_TX_IDX].uptr);
       RC.ru[j]->att_rx                            = *(RUParamList.paramarray[j][RU_ATT_RX_IDX].uptr);
-      RC.ru[j]->if_frequency                      = *(RUParamList.paramarray[j][RU_IF_FREQUENCY].u64ptr);
+      RC.ru[j]->if_frequency                      = (*(RUParamList.paramarray[j][RU_IF_FREQUENCY].u64ptr))*1000;
       RC.ru[j]->if_freq_offset                    = *(RUParamList.paramarray[j][RU_IF_FREQ_OFFSET].iptr);
       RC.ru[j]->do_precoding                      = *(RUParamList.paramarray[j][RU_DO_PRECODING].iptr);
       RC.ru[j]->sl_ahead                          = *(RUParamList.paramarray[j][RU_SL_AHEAD].iptr);
