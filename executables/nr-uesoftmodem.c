@@ -254,8 +254,8 @@ void set_options(int CC_id, PHY_VARS_NR_UE *UE){
   UE->chest_time           = nrUE_params.chest_time;
   UE->no_timing_correction = nrUE_params.no_timing_correction;
 
-  LOG_I(PHY,"Set UE_fo_compensation %d, UE_scan_carrier %d, UE_no_timing_correction %d \n, chest-freq %d, chest-time %d\n",
-        UE->UE_fo_compensation, UE->UE_scan_carrier, UE->no_timing_correction, UE->chest_freq, UE->chest_time);
+  LOG_I(PHY,"Set UE_fo_compensation %d, UE_scan_carrier %d, UE_no_timing_correction %d \n, chest-freq %d, chest-time %d, if_freq %lu\n",
+        UE->UE_fo_compensation, UE->UE_scan_carrier, UE->no_timing_correction, UE->chest_freq, UE->chest_time, UE->if_freq);
 
   // Set FP variables
 
