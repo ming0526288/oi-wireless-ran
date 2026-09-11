@@ -38,6 +38,8 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <stdint.h>
+#include <math.h>
 #include <sys/epoll.h>
 #include <string.h>
 
@@ -177,7 +179,105 @@ typedef struct {
   poll_telnetcmdq_func_t poll_telnetcmdq;
   int wait_timeout;
   double prop_delay_ms;
+  bool if_interference_enabled;
+  double if_interference_center_hz;
+  double if_interference_bandwidth_hz;
+  int if_interference_amplitude;
+  uint32_t if_interference_seed;
+  double rx_frequency_hz;
+  double rx_bandwidth_hz;
+  bool if_interference_active;
 } rfsimulator_state_t;
+
+static int16_t saturate_i16(int32_t value)
+{
+  if (value > INT16_MAX)
+    return INT16_MAX;
+  if (value < INT16_MIN)
+    return INT16_MIN;
+  return value;
+}
+
+static uint32_t if_interference_random(rfsimulator_state_t *state)
+{
+  uint32_t x = state->if_interference_seed;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  state->if_interference_seed = x;
+  return x;
+}
+
+static void update_if_interference_state(rfsimulator_state_t *state)
+{
+  const double separation = fabs(state->rx_frequency_hz - state->if_interference_center_hz);
+  const double overlap_limit = (state->rx_bandwidth_hz + state->if_interference_bandwidth_hz) / 2.0;
+  const bool active = state->if_interference_enabled && separation <= overlap_limit;
+  if (active != state->if_interference_active) {
+    LOG_I(HW,
+          "IF interference %s: rx %.0f Hz bw %.0f Hz, interferer %.0f Hz bw %.0f Hz, amplitude %d\n",
+          active ? "active" : "inactive",
+          state->rx_frequency_hz,
+          state->rx_bandwidth_hz,
+          state->if_interference_center_hz,
+          state->if_interference_bandwidth_hz,
+          state->if_interference_amplitude);
+  }
+  state->if_interference_active = active;
+}
+
+static void load_if_interference_config(rfsimulator_state_t *state)
+{
+  const char *path = getenv("RFSIM_IF_INTERFERENCE_CONFIG");
+  if (path == NULL || path[0] == '\0')
+    return;
+
+  FILE *config = fopen(path, "r");
+  AssertFatal(config != NULL, "Cannot open IF interference config %s: %s\n", path, strerror(errno));
+
+  char key[64];
+  char value[128];
+  while (fscanf(config, " %63[^= \t\r\n] = %127s", key, value) == 2) {
+    if (strcmp(key, "enabled") == 0)
+      state->if_interference_enabled = strtol(value, NULL, 0) != 0;
+    else if (strcmp(key, "center_hz") == 0)
+      state->if_interference_center_hz = strtod(value, NULL);
+    else if (strcmp(key, "bandwidth_hz") == 0)
+      state->if_interference_bandwidth_hz = strtod(value, NULL);
+    else if (strcmp(key, "amplitude") == 0)
+      state->if_interference_amplitude = strtol(value, NULL, 0);
+    else if (strcmp(key, "seed") == 0)
+      state->if_interference_seed = strtoul(value, NULL, 0);
+    else
+      AssertFatal(false, "Unknown IF interference key %s in %s\n", key, path);
+  }
+  fclose(config);
+
+  AssertFatal(state->if_interference_center_hz > 0, "IF interference center_hz must be positive\n");
+  AssertFatal(state->if_interference_bandwidth_hz > 0, "IF interference bandwidth_hz must be positive\n");
+  AssertFatal(state->if_interference_amplitude > 0 && state->if_interference_amplitude <= INT16_MAX,
+              "IF interference amplitude must be in 1..%d\n",
+              INT16_MAX);
+  if (state->if_interference_seed == 0)
+    state->if_interference_seed = 1;
+  LOG_I(HW, "Loaded IF interference configuration from %s\n", path);
+}
+
+static void add_if_interference(rfsimulator_state_t *state, void **samples, int nsamps, int nbAnt)
+{
+  if (!state->if_interference_active)
+    return;
+
+  for (int antenna = 0; antenna < nbAnt; ++antenna) {
+    sample_t *output = samples[antenna];
+    for (int sample = 0; sample < nsamps; ++sample) {
+      const int32_t real_noise = (int32_t)(if_interference_random(state) & 0xffff) - 32768;
+      const int32_t imag_noise = (int32_t)(if_interference_random(state) & 0xffff) - 32768;
+      output[sample].r = saturate_i16(output[sample].r + real_noise * state->if_interference_amplitude / 32768);
+      output[sample].i = saturate_i16(output[sample].i + imag_noise * state->if_interference_amplitude / 32768);
+    }
+  }
+}
 
 static int allocCirBuf(rfsimulator_state_t *bridge, int sock)
 {
@@ -933,6 +1033,8 @@ static int rfsimulator_read(openair0_device *device, openair0_timestamp *ptimest
     }
   }
 
+  add_if_interference(t, samplesVoid, nsamps, nbAnt);
+
   *ptimestamp = t->nextRxTstamp; // return the time of the first sample
   t->nextRxTstamp+=nsamps;
   LOG_D(HW,
@@ -963,6 +1065,10 @@ static int rfsimulator_stop(openair0_device *device) {
   return 0;
 }
 static int rfsimulator_set_freq(openair0_device *device, openair0_config_t *openair0_cfg) {
+  rfsimulator_state_t *state = device->priv;
+  state->rx_frequency_hz = openair0_cfg->rx_freq[0];
+  state->rx_bandwidth_hz = openair0_cfg->rx_bw;
+  update_if_interference_state(state);
   return 0;
 }
 static int rfsimulator_set_gains(openair0_device *device, openair0_config_t *openair0_cfg) {
@@ -981,6 +1087,11 @@ int device_init(openair0_device *device, openair0_config_t *openair0_cfg) {
   rfsimulator->rx_num_channels=openair0_cfg->rx_num_channels;
   rfsimulator->sample_rate=openair0_cfg->sample_rate;
   rfsimulator->tx_bw=openair0_cfg->tx_bw;  
+  rfsimulator->rx_frequency_hz=openair0_cfg->rx_freq[0];
+  rfsimulator->rx_bandwidth_hz=openair0_cfg->rx_bw;
+  rfsimulator->if_interference_seed=1;
+  load_if_interference_config(rfsimulator);
+  update_if_interference_state(rfsimulator);
   rfsimulator_readconfig(rfsimulator);
   if (rfsimulator->prop_delay_ms > 0.0)
     rfsimulator->chan_offset = ceil(rfsimulator->sample_rate * rfsimulator->prop_delay_ms / 1000);

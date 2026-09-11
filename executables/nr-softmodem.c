@@ -79,6 +79,7 @@ unsigned short config_frames[4] = {2,9,11,13};
 #include "nfapi/oai_integration/vendor_ext.h"
 #include "gnb_config.h"
 #include "openair2/E1AP/e1ap_common.h"
+#include "LAYER2/NR_MAC_gNB/external_ul_mcs_control.h"
 #include "LAYER2/NR_MAC_gNB/nr_mac_gNB.h"
 #ifdef ENABLE_AERIAL
 #include "nfapi/oai_integration/aerial/fapi_nvIPC.h"
@@ -675,6 +676,11 @@ int main( int argc, char **argv ) {
   if (NFAPI_MODE != NFAPI_MODE_PNF) {
     int ret = create_gNB_tasks(node_type, uniqCfg);
     AssertFatal(ret == 0, "cannot create ITTI tasks\n");
+  }
+
+  if (NODE_IS_DU(node_type) || NODE_IS_MONOLITHIC(node_type)) {
+    if (start_external_ul_mcs_control() != 0)
+      LOG_W(HW, "[External Control] failed to start UL MCS control thread\n");
   }
 
   pthread_cond_init(&sync_cond,NULL);

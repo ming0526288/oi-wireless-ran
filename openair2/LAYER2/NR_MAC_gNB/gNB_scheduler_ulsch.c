@@ -37,6 +37,7 @@
 #include "LAYER2/NR_MAC_COMMON/nr_mac_extern.h"
 #include "LAYER2/nr_rlc/nr_rlc_oai_api.h"
 #include "LAYER2/RLC/rlc.h"
+#include "external_ul_mcs_control.h"
 
 //#define SRS_IND_DEBUG
 
@@ -1841,9 +1842,10 @@ static void pf_ul(module_id_t module_id,
     const int max_mcs_table = (current_BWP->mcs_table == 0 || current_BWP->mcs_table == 2) ? 28 : 27;
     int max_mcs = min(bo->max_mcs, max_mcs_table); /* no per-user maximum MCS yet */
     
-    if (cnt == 1)
-    {
-        max_mcs = 9;
+    if (external_ul_mcs_control_is_active()) {
+      max_mcs = min(max_mcs, get_external_ul_max_mcs(frame, slot));
+    } else if (cnt == 1) {
+      max_mcs = 9;
     }
     if (bo->harq_round_max == 1)
       sched_pusch->mcs = max_mcs;
