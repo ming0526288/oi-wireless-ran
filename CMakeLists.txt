@@ -272,6 +272,7 @@ add_boolean_option(ENABLE_LTTNG        False "Activate the LTTNG tracer, a debug
 add_boolean_option(UE_AUTOTEST_TRACE   False "Activate UE autotest specific logs" ON)
 add_boolean_option(UE_DEBUG_TRACE      False "Activate UE debug trace" ON)
 add_boolean_option(UE_TIMING_TRACE     False "Activate UE timing trace" ON)
+add_boolean_option(LATSEQ              False "Active Latency Sequence tools" ON)
 
 set (OCP_ITTI ${OPENAIR_DIR}/common/utils/ocp_itti)
 add_library(ITTI ${OCP_ITTI}/intertask_interface.cpp)
@@ -637,6 +638,9 @@ add_library(UTIL
   ${OPENAIR_DIR}/common/utils/LOG/vcd_signal_dumper.c
   ${OPENAIR2_DIR}/UTIL/OPT/probe.c
 )
+if (LATSEQ)
+  target_sources(UTIL PRIVATE ${OPENAIR_DIR}/common/utils/LATSEQ/latseq.c)
+endif()
 if (ENABLE_LTTNG)
   find_package(LTTngUST 2.3.8 EXACT REQUIRED)
 else()

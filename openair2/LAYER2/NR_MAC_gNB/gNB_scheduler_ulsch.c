@@ -38,6 +38,10 @@
 #include "LAYER2/nr_rlc/nr_rlc_oai_api.h"
 #include "LAYER2/RLC/rlc.h"
 #include "external_ul_mcs_control.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
 
 //#define SRS_IND_DEBUG
 
@@ -211,6 +215,13 @@ static int nr_process_mac_pdu(instance_t module_idP,
                               const int8_t harq_pid)
 {
 
+  #if LATSEQ
+  if (g_latseq.is_running)
+  {
+    LATSEQ_P("U mac.ts","rnti=%d,uid=%d,sfn=%d,slot=%d,hpid=%d,plen=%d",
+    UE->rnti,UE->uid, frameP, slot, harq_pid,pdu_len);
+  }
+  #endif
   uint8_t done = 0;
   int sdus = 0;
   NR_UE_UL_BWP_t *ul_bwp = &UE->current_UL_BWP;
@@ -456,6 +467,22 @@ static int nr_process_mac_pdu(instance_t module_idP,
               mac_len);
         UE->mac_stats.ul.lc_bytes[rx_lcid] += mac_len;
 
+        //MODIF RLC infos
+        #if LATSEQ
+        if (g_latseq.is_running && mac_len >= 3)
+        {
+          unsigned char *sdu_buffer = (unsigned char *)(pduP + mac_subheader_len);
+          // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+          // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+          //uint8_t dc_bit = sdu_buffer[0] >> 7;
+          uint32_t rlc_sn = sdu_buffer[0] << ((8*3) + 6);
+          rlc_sn = rlc_sn >> 14;
+          rlc_sn = rlc_sn | sdu_buffer[1] << 8;
+          rlc_sn = rlc_sn | sdu_buffer[2];
+          LATSEQ_P("U rlc.ts","rnti=%d,sfn=%d,slot=%d,lcid=%d,hpid=%d,plen=%d,rsn=%d",
+          UE->rnti, frameP, slot, rx_lcid, harq_pid, pdu_len, rlc_sn);
+        }
+        #endif
         mac_rlc_data_ind(module_idP,
                          UE->rnti,
                          module_idP,
@@ -2424,6 +2451,15 @@ void nr_schedule_ulsch(module_id_t module_id, frame_t frame, sub_frame_t slot, n
     pusch_pdu->nrOfLayers = sched_pusch->nrOfLayers;
     pusch_pdu->num_dmrs_cdm_grps_no_data = sched_pusch->dmrs_info.num_dmrs_cdm_grps_no_data;
 
+    #if LATSEQ
+    if (g_latseq.is_running)
+    {
+      LATSEQ_P("D pusch.sched","rnti=%d,sfn=%d,slot=%d,hpid=%d,round=%d,rbs=%d,tbs=%d,midx=%d,mod=%d,codr=%d",
+                pusch_pdu->rnti, sched_pusch->frame, sched_pusch->slot, harq_id,
+                cur_harq->round, sched_pusch->rbSize, sched_pusch->tb_size,
+                sched_pusch->mcs, sched_pusch->Qm, sched_pusch->R);
+    }
+    #endif
     /* FAPI: DMRS */
     pusch_pdu->num_dmrs_cdm_grps_no_data = sched_pusch->dmrs_info.num_dmrs_cdm_grps_no_data;
     pusch_pdu->dmrs_ports = ((1<<sched_pusch->nrOfLayers) - 1);

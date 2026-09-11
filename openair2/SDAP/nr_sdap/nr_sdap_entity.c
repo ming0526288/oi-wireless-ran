@@ -28,6 +28,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
 
 typedef struct {
   nr_sdap_entity_t *sdap_entity_llist;
@@ -236,6 +240,63 @@ static void nr_sdap_rx_entity(nr_sdap_entity_t *entity,
       }
     }
 
+    // GTP-U TS + infos
+    // MODIF SDAP TS + infos
+    #if LATSEQ
+      //check IP version
+    if (g_latseq.is_running && size >= (has_sdap_rx ? 1 : 0) + 20)
+    {
+      uint8_t sdap_header_size = 0;
+      if (has_sdap_rx)
+      {
+        sdap_header_size = 1;
+      }
+      uint8_t ind = sdap_header_size;
+      unsigned char *sdu_buffer = (unsigned char *)buf;// +1
+      uint8_t ip_type = sdu_buffer[ind] >> 4;
+      if (ip_type == 4)
+      {
+        ind = ind + 4;
+        uint8_t ind2 = sdap_header_size + 5;
+        uint16_t ip_id = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+        ind = sdap_header_size;
+        uint8_t ip_hdr_size = (sdu_buffer[ind] & 0x0f) * 4;
+        ind = sdap_header_size + 9;
+        uint8_t protocol_id = sdu_buffer[ind];
+        //UDP info
+        uint8_t udp_hdr_size = 8;
+        int full_hdr_size = ip_hdr_size + udp_hdr_size + sdap_header_size;
+        int app_count_idx = full_hdr_size + 8;
+        if (protocol_id == 17 && size >= app_count_idx + 8)
+        {
+          uint8_t app_count_size_bytes = 8;
+          uint64_t app_count = 0;
+
+          for (int i = app_count_idx; i < app_count_idx + app_count_size_bytes; i++)
+          {
+            app_count = app_count << 8| sdu_buffer[i];
+          }
+
+          LATSEQ_P("U gtp.ts.infos","uid=%d,sid=%d,slen=%d,ipt=%d,iphl=%d,ptid=%d,ipid=%d,bid=%d,appc=%d",
+                                      ue_id, pdusession_id,size,ip_type,
+                                      ip_hdr_size, protocol_id, ip_id,
+                                      pdusession_id, app_count);
+        }
+        else
+        {
+          LATSEQ_P("U gtp.ts.infos","uid=%d,sid=%d,slen=%d,ipt=%d,iphl=%d,ptid=%d,ipid=%d,bid=%d",
+                                      ue_id, pdusession_id, size, ip_type,
+                                      ip_hdr_size, protocol_id, ip_id,
+                                      pdusession_id);
+        }
+      }
+      else
+      {
+        LATSEQ_P("U gtp.ts.infos.ipv6","uid=%d,sid=%d,slen=%d",
+                                      ue_id, pdusession_id, size);
+      }
+    }
+    #endif
     // Pushing SDAP SDU to GTP-U Layer
     MessageDef *message_p = itti_alloc_new_message_sized(TASK_PDCP_ENB,
                                                          0,
@@ -252,6 +313,7 @@ static void nr_sdap_rx_entity(nr_sdap_entity_t *entity,
     req->ue_id         = ue_id;
     req->bearer_id     = pdusession_id;
     LOG_D(SDAP, "%s()  sending message to gtp size %d\n", __func__,  size-offset);
+
     // very very dirty hack gloabl var N3GTPUInst
     itti_send_msg_to_task(TASK_GTPV1_U, *N3GTPUInst, message_p);
   } else { //nrUE
