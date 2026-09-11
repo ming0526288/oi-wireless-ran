@@ -43,6 +43,11 @@
 #include "gnb_config.h"
 #include "executables/softmodem-common.h"
 #include "cuup_cucp_if.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
 
 #define TODO do { \
     printf("%s:%d:%s: todo\n", __FILE__, __LINE__, __FUNCTION__); \
@@ -1256,6 +1261,61 @@ bool nr_pdcp_data_req_drb(protocol_ctxt_t *ctxt_pP,
     nr_pdcp_manager_unlock(nr_pdcp_ue_manager);
     return 0;
   }
+
+   // MODIF 2
+  #if LATSEQ
+  if (latseq_ul)
+  {
+    //check IP version
+    if (rb->type == NR_PDCP_DRB_AM || rb->type == NR_PDCP_DRB_UM) // DRB side
+    {
+      //IP info
+      uint8_t sdap_header_size = 0;
+      if (rb->has_sdap_tx) sdap_header_size = 1;
+      uint8_t ind = sdap_header_size;
+      //unsigned char *sdu_buffer = buffer;// +1
+      uint8_t ip_type = sdu_buffer[ind] >> 4;
+      if (ip_type == 4)
+      {
+        ind = ind + 4;
+        uint8_t ind2 = sdap_header_size + 5;
+        uint16_t ip_id = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+        ind = sdap_header_size;
+        uint8_t ip_hdr_size = (sdu_buffer[ind] & 0x0f) * 4;
+        ind = sdap_header_size + 9;
+        uint8_t protocol_id = sdu_buffer[ind];
+
+        //UDP info
+        if (protocol_id == 17)
+        {
+          uint8_t udp_hdr_size = 8;
+          int full_hdr_size = ip_hdr_size + udp_hdr_size + sdap_header_size;
+          int app_count_idx = full_hdr_size+8;
+          uint8_t app_count_size_bytes = 8;
+          uint64_t app_count = 0;
+
+          for (int i = app_count_idx; i < app_count_idx+app_count_size_bytes; i++)
+          {
+            app_count = app_count << 8| sdu_buffer[i];
+          }
+
+          LATSEQ_P("U pdcp.ts","uid=%d,ipid=%d,ptid=%d,appc=%ld",
+                                            ue_id, ip_id,protocol_id,app_count);
+        }
+        else
+        {
+          LATSEQ_P("U pdcp.ts","uid=%d,ipid=%d,ptid=%d",
+                                            ue_id, ip_id,protocol_id);
+        }
+      }
+      else
+      {
+        LATSEQ_P("U pdcp.ts.ipv6","uid=%d", ue_id);
+      }
+      rb->rnti = ue_id;
+    }
+  }
+  #endif
 
   int max_size = sdu_buffer_size + 3 + 4; // 3: max header, 4: max integrity
   char pdu_buf[max_size];

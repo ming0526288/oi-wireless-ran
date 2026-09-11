@@ -41,6 +41,12 @@
 #include "openair2/F1AP/f1ap_du_rrc_message_transfer.h"
 #include "openair2/F1AP/f1ap_ids.h"
 
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
+
 extern RAN_CONTEXT_t RC;
 
 #include <stdint.h>
@@ -149,6 +155,15 @@ void mac_rlc_data_ind(const module_id_t  module_idP,
   if (rb != NULL) {
     LOG_D(RLC, "RB found! (channel ID %d) \n", channel_idP);
     rb->set_time(rb, nr_rlc_current_time);
+
+    #if LATSEQ
+    if (latseq_ul)
+    {
+      rb->rnti = rntiP;
+      rb->lcid = channel_idP;
+    }
+    #endif
+
     rb->recv_pdu(rb, buffer_pP, tb_sizeP);
   } else {
     LOG_E(RLC, "Fatal: no RB found (channel ID %d RNTI %d)\n",
@@ -182,6 +197,15 @@ tbs_size_t mac_rlc_data_req(const module_id_t  module_idP,
     LOG_D(RLC, "MAC PDU to get created for channel_idP:%d \n", channel_idP);
     rb->set_time(rb, nr_rlc_current_time);
     maxsize = tb_sizeP;
+    //MODIF START
+    #if LATSEQ
+    if (latseq_ul)
+    {
+      rb->lcid = channel_idP;
+    }
+    #endif
+    //MODIF END
+
     ret = rb->generate_pdu(rb, buffer_pP, maxsize);
   } else {
     LOG_D(RLC, "MAC PDU failed to get created for channel_idP:%d \n", channel_idP);
@@ -326,6 +350,25 @@ rlc_op_status_t rlc_data_req(const protocol_ctxt_t *const ctxt_pP,
     if (rb_idP >= 1 && rb_idP <= MAX_DRBS_PER_UE)
       rb = ue->drb[rb_idP - 1];
   }
+
+  #if LATSEQ
+  if (latseq_ul)
+  {
+    if (!srb_flagP && rb != NULL) // we are on UE data
+    {
+      rb->rnti = rnti;
+      unsigned char *sdu_buffer = (unsigned char *)sdu_pP;
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      //uint8_t dc_bit = sdu_buffer[0] >> 3;
+      uint32_t pdcp_sn = sdu_buffer[0] << ((8*3) + 4);
+      pdcp_sn = pdcp_sn >> 12;
+      pdcp_sn = pdcp_sn | sdu_buffer[1] << 8;
+      pdcp_sn = pdcp_sn | sdu_buffer[2];
+      LATSEQ_P("U rlc.ts","ueid=%d,psn=%d", rnti, pdcp_sn);
+    }
+  }
+  #endif
 
   if (rb != NULL) {
     rb->set_time(rb, nr_rlc_current_time);

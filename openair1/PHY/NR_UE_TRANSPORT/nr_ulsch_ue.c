@@ -49,6 +49,12 @@
 #include "PHY/NR_REFSIG/ul_ref_seq_nr.h"
 #include <openair2/UTIL/OPT/opt.h>
 
+// MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
+
 //#define DEBUG_PUSCH_MAPPING
 //#define DEBUG_MAC_PDU
 //#define DEBUG_DFT_IDFT
@@ -579,6 +585,16 @@ void nr_ue_ulsch_procedures(PHY_VARS_NR_UE *UE,
       } //RB loop
     } // symbol loop
   }// port loop
+
+    //MODIF
+  #if LATSEQ
+  if (latseq_ul)
+  {
+    LATSEQ_P("U phy.mapping","rnti=%d,sfn=%d,slot=%d,mod=%d,tbs=%d,hpid=%d",
+                              ulsch_ue->pusch_pdu.rnti, frame, slot, mod_order,
+                              tb_size, harq_pid);
+  }
+  #endif
 
   NR_UL_UE_HARQ_t *harq_process_ulsch=NULL;
   harq_process_ulsch = &UE->ul_harq_processes[harq_pid];

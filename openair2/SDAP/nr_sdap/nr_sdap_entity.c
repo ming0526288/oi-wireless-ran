@@ -28,6 +28,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
 
 typedef struct {
   nr_sdap_entity_t *sdap_entity_llist;
@@ -153,6 +158,63 @@ static bool nr_sdap_tx_entity(nr_sdap_entity_t *entity,
     LOG_D(SDAP, "TX Entity DC:  %u \n", sdap_hdr.DC);
   }
 
+   // MODIF 2 - in case of SDAP used
+  #if LATSEQ
+    if (!ctxt_p->enb_flag && latseq_ul)// UL -> UE
+    {
+    //check IP version
+
+      //IP info
+      uint8_t ip_type = sdu_buffer[0] >> 4; // >> ((sdu_buffer_size * 8) - 4)
+      if (ip_type == 4)
+      {
+        uint16_t ip_id = sdu_buffer[4] << 8 | sdu_buffer[5];
+        uint8_t ip_hdr_size = (sdu_buffer[0] & 0x0f) * 4; // size is number of line with 4 bytes
+        uint8_t protocol_id = sdu_buffer[9];
+
+        //UDP info
+        if (protocol_id == 17)
+        {
+          uint8_t udp_hdr_size = 8;
+          int full_hdr_size = ip_hdr_size + udp_hdr_size;
+          int app_count_idx = full_hdr_size+8;
+          uint8_t app_count_size_bytes = 8;
+          //uint8_t decal = 7;
+          uint64_t app_count = 0;//sdu_buffer[app_count_idx]; // step 1  << (full_hdr_size * 8)
+
+          uint8_t ind = ip_hdr_size + 12;
+          uint8_t ind2 = ip_hdr_size + 13;
+          uint16_t sp = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+          ind = ip_hdr_size + 14;
+          ind2 = ip_hdr_size + 15;
+          uint16_t dp = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+          for (int i = app_count_idx; i < app_count_idx + app_count_size_bytes; i++)
+          {
+            app_count = app_count << 8| sdu_buffer[i];
+          }
+
+          LATSEQ_P("U sdap.infos","uid=%d,shl=%d,qfi=%d,dc=%d,ipt=%d,ipid=%d,ptid=%d,appc=%ld,sp=%d,dp=%d",
+                                          ctxt_p->rntiMaybeUEid, SDAP_HDR_LENGTH,
+                                          qfi, rqi, ip_type, ip_id, protocol_id,
+                                          app_count, sp, dp);
+        }
+        else
+        {
+          LATSEQ_P("U sdap.infos","uid=%d,shl=%d,qfi=%d,dc=%d,ipt=%d,ipid=%d,ptid=%d",
+                                          ctxt_p->rntiMaybeUEid, SDAP_HDR_LENGTH,
+                                          qfi, rqi, ip_type, ip_id, protocol_id);
+        }
+      }
+      else
+      {
+        LATSEQ_P("U sdap.infos.ipv6","uid=%d,shl=%d,qfi=%d,dc=%d,ipt=%d",
+                                          ctxt_p->rntiMaybeUEid, SDAP_HDR_LENGTH,
+                                          qfi, rqi, ip_type);
+      }
+    }
+  #endif
   /*
    * TS 37.324 5.2 Data transfer
    * 5.2.1 Uplink UE side

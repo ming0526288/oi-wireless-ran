@@ -28,6 +28,11 @@
 
 #include "LOG/log.h"
 #include "common/utils/time_stat.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
 
 /* for a given SDU/SDU segment, computes the corresponding PDU header size */
 static int compute_pdu_header_size(nr_rlc_entity_am_t *entity,
@@ -529,6 +534,18 @@ process_wait_list_head:
         /* update buffer status */
         entity->common.bstatus.retx_size += compute_pdu_header_size(entity, cur_wait_list)
                                             + cur_wait_list->size;
+
+        //MODIF buffer increase, cur sn > ackSN -> rtx list
+        #if LATSEQ
+        if (latseq_ul && entity->common.lcid > 2)
+        {
+          LATSEQ_P("U rlc.buff.put.rtx","uid=%d,blen=%d,so=%d,slen=%d,rsn=%d",
+                                        entity->common.rnti,
+                                        entity->common.bstatus.retx_size,
+                                        cur_wait_list->so, cur_wait_list->size,
+                                        cur_wait_list->sdu->sn);
+        }
+        #endif
         /* and go process the next pdu, still for the current nack */
         cur_wait_list = prev_wait_list->next;
         goto process_next_pdu;
@@ -615,6 +632,20 @@ process_retransmit_list_head:
         /* update buffer status */
         entity->common.bstatus.retx_size -= compute_pdu_header_size(entity, cur)
                                             + cur->size;
+
+        //MODIF buffer decrease, segment is acked
+        #if LATSEQ
+        if (latseq_ul && entity->common.lcid > 2)
+        {
+          LATSEQ_P("U rlc.buff.pop.ack","uid=%d,blen=%d,so=%d,slen=%d,rsn=%d",
+                                        entity->common.rnti,
+                                        entity->common.bstatus.retx_size,
+                                        cur_retransmit_list->so,
+                                        cur_retransmit_list->size,
+                                        cur_retransmit_list->sdu->sn);
+        }
+        #endif
+
         if (nr_rlc_free_sdu_segment(cur)) {
           entity->tx_size -= sdu_size;
           // Retransmit-ACK: count as successfully transmitted bytes
@@ -697,6 +728,20 @@ lists_over:
     /* update buffer status */
     entity->common.bstatus.retx_size -= compute_pdu_header_size(entity, cur)
                                         + cur->size;
+
+    //MODIF buffer decrease
+    #if LATSEQ
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      LATSEQ_P("U rlc.buff.pop.ack","uid=%d,blen=%d,so=%d,slen=%d,rsn=%d",
+                                    entity->common.rnti,
+                                    entity->common.bstatus.retx_size,
+                                    cur_retransmit_list->so,
+                                    cur_retransmit_list->size,
+                                    cur_retransmit_list->sdu->sn);
+    }
+    #endif
+
     if (nr_rlc_free_sdu_segment(cur)) {
       entity->tx_size -= sdu_size;
       // Retransmit-NACK done: count as successfully transmitted bytes
@@ -1559,6 +1604,38 @@ static int generate_retx_pdu(nr_rlc_entity_am_t *entity, char *buffer,
   /* update buffer status */
   entity->common.bstatus.retx_size -= pdu_size;
 
+  //MODIF buffer decrease
+  #if LATSEQ
+  if (latseq_ul && entity->common.lcid > 2)
+  {
+    LATSEQ_P("U rlc.buff.pop.rtx","ueid=%d,blen=%d,so=%d,plen=%d,rsn=%d",
+                                  entity->common.rnti,
+                                  entity->common.bstatus.retx_size,
+                                  sdu->so, pdu_size, sdu->sdu->sn);
+  }
+  #endif
+
+ // MODIF 2
+  #if LATSEQ
+    //check IP version
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      unsigned char *sdu_buffer = (unsigned char *)sdu->sdu->data;
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      //uint8_t dc_bit = sdu_buffer[0] >> 3;
+      uint32_t pdcp_sn = sdu_buffer[0] << ((8*3) + 4);
+      pdcp_sn = pdcp_sn >> 12;
+      pdcp_sn = pdcp_sn | sdu_buffer[1] << 8;
+      pdcp_sn = pdcp_sn | sdu_buffer[2];
+
+      LATSEQ_P("U rlc.am.rtx.pdu",
+                "uid=%d,tbs=%d,slen=%d,sglen=%d,rhl=%d,plen=%d,rtxc=%d,so=%d,psn=%d,rsn=%d",
+                entity->common.rnti, size, sdu->sdu->size, sdu->size,pdu_header_size,
+                pdu_size, sdu->sdu->retx_count, sdu->so,pdcp_sn,sdu->sdu->sn);
+    }
+  #endif
+
   /* segment if necessary */
   if (pdu_size > size) {
     nr_rlc_sdu_segment_t *next_sdu;
@@ -1569,6 +1646,17 @@ static int generate_retx_pdu(nr_rlc_entity_am_t *entity, char *buffer,
     /* update buffer status */
     entity->common.bstatus.retx_size += compute_pdu_header_size(entity, next_sdu)
                                         + next_sdu->size;
+
+    //MODIF buffer increase
+    #if LATSEQ
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      LATSEQ_P("U rlc.buff.put.rtx.seg",
+                "uid=%d,blen=%d,so=%d,plen=%d,rsn=%d",
+                entity->common.rnti, entity->common.bstatus.retx_size,
+                next_sdu->so, next_sdu->size, next_sdu->sdu->sn);
+    }
+    #endif
 
     entity->common.stats.txpdu_segmented++;
   }
@@ -1637,11 +1725,44 @@ static int generate_tx_pdu(nr_rlc_entity_am_t *entity, char *buffer, int size)
   /* update buffer status */
   entity->common.bstatus.tx_size -= pdu_size;
 
+
+
   /* assign SN to SDU */
   if (sdu->sdu->sn == -1) {
     sdu->sdu->sn = entity->tx_next;
     entity->tx_next = (entity->tx_next + 1) % entity->sn_modulus;
   }
+
+  //MODIF buffer decrease
+  #if LATSEQ
+  if (latseq_ul && entity->common.lcid > 2)
+  {
+    LATSEQ_P("U rlc.buff.pop.tx",
+              "uid=%d,blen=%d,so=%d,plen=%d,rsn=%d",
+                entity->common.rnti, entity->common.bstatus.tx_size,
+                sdu->so, pdu_size, sdu->sdu->sn);
+  }
+  #endif
+   // MODIF 2
+  #if LATSEQ
+    //check IP version
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      unsigned char *sdu_buffer = (unsigned char *)sdu->sdu->data;
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      //uint8_t dc_bit = sdu_buffer[0] >> 3;
+      uint32_t pdcp_sn = sdu_buffer[0] << ((8*3) + 4);
+      pdcp_sn = pdcp_sn >> 12;
+      pdcp_sn = pdcp_sn | sdu_buffer[1] << 8;
+      pdcp_sn = pdcp_sn | sdu_buffer[2];
+
+      LATSEQ_P("U rlc.am.tx.pdu",
+                "uid=%d,tbs=%d,slen=%d,sglen=%d,rhl=%d,plen=%d,so=%d,psn=%d,rsn=%d",
+                entity->common.rnti, size, sdu->sdu->size, sdu->size,pdu_header_size,pdu_size,
+                sdu->so,pdcp_sn,sdu->sdu->sn);
+    }
+  #endif
 
   /* segment if necessary */
   if (pdu_size > size) {
@@ -1657,6 +1778,18 @@ static int generate_tx_pdu(nr_rlc_entity_am_t *entity, char *buffer, int size)
     /* update buffer status */
     entity->common.bstatus.tx_size += compute_pdu_header_size(entity, next_sdu)
                                       + next_sdu->size;
+
+    //MODIF buffer increase
+    #if LATSEQ
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      LATSEQ_P("U rlc.buff.put.tx.seg","uid=%d,blen=%d,so=%d,slen=%d,rsn=%d",
+                                        entity->common.rnti,
+                                        entity->common.bstatus.tx_size,
+                                        next_sdu->so, next_sdu->size,
+                                        next_sdu->sdu->sn);
+    }
+    #endif
   }
 
   /* put SDU/SDU segment in the wait list */
@@ -1787,9 +1920,28 @@ void nr_rlc_entity_am_recv_sdu(nr_rlc_entity_t *_entity,
 
   nr_rlc_sdu_segment_list_append(&entity->tx_list, &entity->tx_end, sdu);
 
-  /* update buffer status */
+  /* update buffer status */ // MODIF repérer l'état du buffer ici ?
   entity->common.bstatus.tx_size += compute_pdu_header_size(entity, sdu)
                                     + sdu->size;
+
+  //MODIF buffer increase sdu size without header, sdu Id == psn ?
+  #if LATSEQ
+  if (latseq_ul && entity->common.lcid > 2)
+  {
+    unsigned char *sdu_buffer = (unsigned char *)sdu->sdu->data;
+    // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+    // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+    //uint8_t dc_bit = sdu_buffer[0] >> 3;
+    uint32_t pdcp_sn = sdu_buffer[0] << ((8*3) + 4);
+    pdcp_sn = pdcp_sn >> 12;
+    pdcp_sn = pdcp_sn | sdu_buffer[1] << 8;
+    pdcp_sn = pdcp_sn | sdu_buffer[2];
+    LATSEQ_P("U rlc.buff.recv",
+              "uid=%d,sdid=%d,blen=%d,so=%d,slen=%d,psn=%d",
+              entity->common.rnti, sdu_id, entity->common.bstatus.tx_size, sdu->so,
+              sdu->size, pdcp_sn);
+  }
+  #endif
 
   if (entity->common.avg_time_is_on)
     sdu->sdu->time_of_arrival = time_average_now();
@@ -1865,6 +2017,17 @@ static void check_t_poll_retransmit(nr_rlc_entity_am_t *entity)
     /* update buffer status */
     entity->common.bstatus.retx_size += compute_pdu_header_size(entity, cur)
                                         + cur->size;
+
+    //MODIF ack_sn not received in time ?
+    #if LATSEQ
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      LATSEQ_P("U rlc.buff.put.rtx.poll",
+                "uid=%d,blen=%d,so=%d,slen=%d,rsn=%d",
+                entity->common.rnti, entity->common.bstatus.retx_size,
+                cur->so, cur->size, cur->sdu->sn);
+    }
+    #endif
 
     LOG_D(RLC, "put sn %d so %d size %d in retx list (retx_count %d)\n",
           cur->sdu->sn, cur->so, cur->size, cur->sdu->retx_count);
@@ -1975,6 +2138,16 @@ void nr_rlc_entity_am_discard_sdu(nr_rlc_entity_t *_entity, int sdu_id)
 
   entity->tx_size -= cur->sdu->size;
 
+  //MODIF buffer decrease
+  #if LATSEQ
+  if (latseq_ul && entity->common.lcid > 2)
+  {
+    LATSEQ_P("U rlc.buff.pop.discard","uid=%d,blen=%d,so=%d,slen=%d,rsn=%d",
+                                      entity->common.rnti,
+                                      entity->common.bstatus.tx_size,
+                                      cur->so, cur->size, cur->sdu->sn);
+  }
+  #endif
   /* Uncomment to assert if SDU are ever discarded */
   // assert(0 != 0 && "[RLC-TRAP] SDU discard should never be reached!");
 

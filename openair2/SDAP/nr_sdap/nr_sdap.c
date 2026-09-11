@@ -20,6 +20,11 @@
  */
 
 #include "nr_sdap.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
 
 uint8_t nas_qfi;
 uint8_t nas_pduid;
@@ -40,7 +45,69 @@ bool sdap_data_req(protocol_ctxt_t *ctxt_p,
                    const int pdusession_id) {
   nr_sdap_entity_t *sdap_entity;
   sdap_entity = nr_sdap_get_entity(ue_id, pdusession_id);
+   // MODIF 2
+  #if LATSEQ
+  if (latseq_ul)
+  {
+    if (sdap_entity != NULL)
+    {
+    //check IP version
 
+      //IP info
+      uint8_t ip_type = sdu_buffer[0] >> 4; // >> ((sdu_buffer_size * 8) - 4)
+      if (ip_type == 4)
+      {
+        uint16_t ip_id = sdu_buffer[4] << 8 | sdu_buffer[5];
+        uint8_t ip_hdr_size = (sdu_buffer[0] & 0x0f) * 4; // size is number of line with 4 bytes
+        uint8_t protocol_id = sdu_buffer[9];
+
+        //UDP info
+        if (protocol_id == 17)
+        {
+          uint8_t udp_hdr_size = 8;
+          int full_hdr_size = ip_hdr_size + udp_hdr_size;
+          int app_count_idx = full_hdr_size+8;
+          uint8_t app_count_size_bytes = 8;
+          //uint8_t decal = 7;
+          uint64_t app_count = 0;//sdu_buffer[app_count_idx]; // step 1  << (full_hdr_size * 8)
+
+          uint8_t ind = ip_hdr_size + 0;
+          uint8_t ind2 = ip_hdr_size + 1;
+          uint16_t sp = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+          ind = ip_hdr_size + 2;
+          ind2 = ip_hdr_size + 3;
+          uint16_t dp = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+          for (int i = app_count_idx; i < app_count_idx + app_count_size_bytes; i++)
+          {
+            app_count = app_count << 8| sdu_buffer[i];
+          }
+
+          LATSEQ_P("U sdap.ts","uid=%d,rbid=%d,slen=%d,ipt=%d,iphl=%d,ptid=%d,appc=%ld,ipid=%d,sp=%d,dp=%d",
+                                      ue_id, rb_id, sdu_buffer_size,ip_type,
+                                      ip_hdr_size, protocol_id, app_count, ip_id,
+                                      sp, dp);
+        }
+        else
+        {
+          LATSEQ_P("U sdap.ts","uid=%d,rbid=%d,slen=%d,ipt=%d,iphl=%d,ptid=%d,ipid=%d",
+                                      ue_id, rb_id, sdu_buffer_size, ip_type,
+                                      ip_hdr_size, protocol_id, ip_id);
+        }
+      }
+      else
+      {
+        LATSEQ_P("U sdap.ts.ipv6","uid=%d,rbid=%d,slen=%d,ipt=%d",
+                                      ue_id, rb_id, sdu_buffer_size, ip_type);
+      }
+    }
+    else
+    {
+      LATSEQ_P("U sdap.ts","uid=%d,rbid=%d,slen=%d", ue_id, rb_id, sdu_buffer_size);
+    }
+  }
+  #endif
   if(sdap_entity == NULL) {
     LOG_E(SDAP, "%s:%d:%s: Entity not found with ue: 0x%"PRIx64" and pdusession id: %d\n", __FILE__, __LINE__, __FUNCTION__, ue_id, pdusession_id);
     return 0;

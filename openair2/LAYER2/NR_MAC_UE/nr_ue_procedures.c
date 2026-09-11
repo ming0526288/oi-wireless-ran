@@ -57,6 +57,11 @@
 #include "oai_asn1.h"
 #include "common/utils/LOG/log.h"
 #include "common/utils/LOG/vcd_signal_dumper.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
 
 //#define DEBUG_MIB
 //#define ENABLE_MAC_PAYLOAD_DEBUG 1
@@ -2478,6 +2483,14 @@ int8_t nr_ue_get_SR(NR_UE_MAC_INST_t *mac, frame_t frameP, slot_t slot)
       si->sr_ProhibitTimer_Running = 0;
     }
     //mac->ul_active =1;
+    //MODIF LATSEQ
+    #if LATSEQ
+    if (latseq_ul)
+    {
+      LATSEQ_P("U  sr.req","rnti=%d,uid=%d,sfn=%d,slot=%d", mac->crnti, mac->ue_id, frameP, slot);
+    }
+    #endif
+
     return (1);   //instruct phy to signal SR
   } else {
     // notify RRC to relase PUCCH/SRS
@@ -3901,6 +3914,14 @@ int nr_write_ce_ulsch_pdu(uint8_t *mac_ce,
     mac_ce_len += mac_ce_size + sizeof(NR_MAC_SUBHEADER_FIXED);
     LOG_D(NR_MAC, "[UE] Generating ULSCH PDU : truncated_bsr Buffer_size %d LcgID %d pdu %p mac_ce %p\n",
           truncated_bsr->Buffer_size, truncated_bsr->LcgID, pdu, mac_ce);
+    //MODIF: truncared BSR
+    // MODIF 2
+    #if LATSEQ
+    if (latseq_ul)
+    {
+      LATSEQ_P("U  mac.trunc.bsr","rnti=%d,uid=%d,len=%d",mac->crnti, mac->ue_id, truncated_bsr->Buffer_size);
+    }
+    #endif
 
   } else if (short_bsr) {
 
@@ -3919,6 +3940,17 @@ int nr_write_ce_ulsch_pdu(uint8_t *mac_ce,
     mac_ce_len += mac_ce_size + sizeof(NR_MAC_SUBHEADER_FIXED);
     LOG_D(NR_MAC, "[UE] Generating ULSCH PDU : short_bsr Buffer_size %d LcgID %d pdu %p mac_ce %p\n",
           short_bsr->Buffer_size, short_bsr->LcgID, pdu, mac_ce);
+
+    //MODIF: short BSR
+    // MODIF 3
+    #if LATSEQ
+    if (latseq_ul)
+    {
+      LATSEQ_P("U mac.short.bsr","rnti=%d,uid=%d,len=%d",
+                                  mac->crnti, mac->ue_id, short_bsr->Buffer_size);
+    }
+    #endif
+
   } else if (long_bsr) {
 
 	// MAC CE variable subheader
@@ -3988,6 +4020,24 @@ int nr_write_ce_ulsch_pdu(uint8_t *mac_ce,
     // update pointer and length
     mac_ce = Buffer_size_ptr;
     mac_ce_len += mac_ce_size + sizeof(NR_MAC_SUBHEADER_SHORT);
+
+    //MODIF: long BSR
+    // MODIF 2
+    #if LATSEQ
+    if (latseq_ul)
+    {
+      LATSEQ_P("U mac.long.bsr","rnti=%d,uid=%d,len0=%d,len1=%d,len2=%d,len3=%d,len4=%d,len5=%d,len6=%d,len7=%d",
+                                mac->crnti, mac->ue_id,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size0,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size1,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size2,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size3,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size4,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size5,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size6,
+                                ((NR_BSR_LONG *) mac_ce)->Buffer_size7);
+    }
+    #endif
   }
 
   return mac_ce_len;

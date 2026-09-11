@@ -55,6 +55,12 @@
 #include "LAYER2/NR_MAC_COMMON/nr_mac_extern.h"
 #include "LAYER2/RLC/rlc.h"
 
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
+
 //#define SRS_DEBUG
 
 static void nr_ue_prach_scheduler(NR_UE_MAC_INST_t *mac, frame_t frameP, sub_frame_t slotP);
@@ -782,6 +788,13 @@ int nr_config_pusch_pdu(NR_UE_MAC_INST_t *mac,
     return -1;
   }
 
+  //MODIF
+  #if LATSEQ
+  if (latseq_ul)
+  {
+    LATSEQ_P("U  pusch.alloc","rnti=%d,hpid=%d,mod=%d,tbs=%d", rnti, pusch_config_pdu->pusch_data.harq_process_id, pusch_config_pdu->qam_mod_order, pusch_config_pdu->pusch_data.tb_size);
+  }
+  #endif
   return 0;
 }
 
@@ -3074,6 +3087,25 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
     header->F = 1;
     header->LCID = lcid;
     header->L = htons(sdu_length);
+
+    //MODIF
+    #if LATSEQ
+    if (latseq_ul && lcid > 2)
+    {
+      unsigned char *sdu_buffer = *pdu;
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      // hypothesis PDCP SN is on 18 bits 3gpp 38.323
+      uint8_t dc_bit = sdu_buffer[0] >> 7;
+      uint32_t rlc_sn = sdu_buffer[0] << ((8*3) + 6);
+      rlc_sn = rlc_sn >> 14;
+      rlc_sn = rlc_sn | sdu_buffer[1] << 8;
+      rlc_sn = rlc_sn | sdu_buffer[2];
+      //if (dc_bit & 0x1)
+      LATSEQ_P("U mac.ts",
+                "rnti=%d,uid=%d,sfn=%d,slot=%d,lcid=%d,sdulen=%d,dc=%d,rsn=%d",
+                mac->crnti, mac->ue_id, frameP, subframe, lcid, sdu_length, dc_bit, rlc_sn);
+    }
+    #endif
 
 #ifdef ENABLE_MAC_PAYLOAD_DEBUG
     LOG_I(NR_MAC, "dumping MAC sub-header with length %d: \n", sh_size);

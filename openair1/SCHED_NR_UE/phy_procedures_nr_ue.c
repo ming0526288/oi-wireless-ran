@@ -74,6 +74,11 @@ fifo_dump_emos_UE emos_dump_UE;
 #include "UTIL/OPT/opt.h"
 #include "intertask_interface.h"
 #include "T.h"
+// MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-uesoftmodem.h"
+#endif
 
 static const unsigned int gain_table[31] = {100,  112,  126,  141,  158,  178,  200,  224,  251, 282,  316,
                                             359,  398,  447,  501,  562,  631,  708,  794,  891, 1000, 1122,
@@ -285,6 +290,20 @@ void phy_procedures_nrUE_TX(PHY_VARS_NR_UE *ue, const UE_nr_rxtx_proc_t *proc, n
 
   for (uint8_t harq_pid = 0; harq_pid < NR_MAX_ULSCH_HARQ_PROCESSES; harq_pid++) {
     if (ue->ul_harq_processes[harq_pid].status == ACTIVE) {
+      //MODIF MAC -- PHY
+      #if LATSEQ
+      if (latseq_ul)
+      {
+        LATSEQ_P("U phy.ts","sfn=%d,slot=%d,rnti=%d,mod=%d,tbs=%d,codr=%d,hpid=%d",
+                      frame_tx,
+                      slot_tx,
+                      phy_data->ulsch.pusch_pdu.rnti,
+                      phy_data->ulsch.pusch_pdu.qam_mod_order,
+                      phy_data->ulsch.pusch_pdu.pusch_data.tb_size,
+                      phy_data->ulsch.pusch_pdu.target_code_rate,
+                      harq_pid);
+      }
+      #endif
       nr_ue_ulsch_procedures(ue, harq_pid, frame_tx, slot_tx, gNB_id, phy_data, (c16_t **)&txdataF);
     }
   }

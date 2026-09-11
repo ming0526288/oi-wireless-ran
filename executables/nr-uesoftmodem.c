@@ -86,6 +86,10 @@ unsigned short config_frames[4] = {2,9,11,13};
 #include "nr_nas_msg_sim.h"
 #include <openair1/PHY/MODULATION/nr_modulation.h>
 #include "openair2/GNB_APP/gnb_paramdef.h"
+// MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
 
 extern const char *duplex_mode[];
 THREAD_STRUCT thread_struct;
@@ -110,6 +114,8 @@ int get_node_type() {return -1;}
 RAN_CONTEXT_t RC;
 int oai_exit = 0;
 
+//MODIF latseq
+uint32_t latseq_ul;
 
 extern int16_t  nr_dlsch_demod_shift;
 static int      tx_max_power[MAX_NUM_CCs] = {0};
@@ -490,6 +496,12 @@ int main(int argc, char **argv)
   set_taus_seed (0);
 
   cpuf=get_cpu_freq_GHz();
+
+  // MODIF 2
+  #if LATSEQ
+    init_latseq("/tmp/nr_uesoftmodem", (uint64_t)(cpuf*1000000000LL));
+  #endif
+
   itti_init(TASK_MAX, tasks_info);
 
   init_opt() ;
@@ -608,6 +620,11 @@ int main(int argc, char **argv)
   printf("Returned from ITTI signal handler\n");
   oai_exit=1;
   printf("oai_exit=%d\n",oai_exit);
+
+  // MODIF 3
+  #if LATSEQ
+    close_latseq(); //close befire head of threads
+  #endif
 
   if (ouput_vcd)
     vcd_signal_dumper_close();
