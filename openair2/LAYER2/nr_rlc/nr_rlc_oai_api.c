@@ -211,6 +211,12 @@ tbs_size_t mac_rlc_data_req(const module_id_t  module_idP,
     LOG_D(RLC, "MAC PDU to get created for channel_idP:%d \n", channel_idP);
     rb->set_time(rb, nr_rlc_current_time);
     maxsize = tb_sizeP;
+#if LATSEQ
+    if (g_latseq.is_running && !enb_flagP) {
+      rb->rnti = ue_id;
+      rb->lcid = channel_idP;
+    }
+#endif
     ret = rb->generate_pdu(rb, buffer_pP, maxsize);
   } else {
     LOG_D(RLC, "MAC PDU failed to get created for channel_idP:%d \n", channel_idP);
@@ -357,6 +363,16 @@ rlc_op_status_t rlc_data_req(const protocol_ctxt_t *const ctxt_pP,
   }
 
   if (rb != NULL) {
+#if LATSEQ
+    if (g_latseq.is_running && !ctxt_pP->enb_flag && !srb_flagP && sdu_sizeP >= 3) {
+      rb->rnti = ue_id;
+      const uint8_t *pdcp_pdu = sdu_pP;
+      uint32_t pdcp_sn = ((uint32_t)(pdcp_pdu[0] & 0x03) << 16)
+                         | ((uint32_t)pdcp_pdu[1] << 8)
+                         | pdcp_pdu[2];
+      LATSEQ_P("U rlc.ts", "ueid=%d,psn=%d", ue_id, pdcp_sn);
+    }
+#endif
     rb->set_time(rb, nr_rlc_current_time);
     rb->recv_sdu(rb, (char *)sdu_pP, sdu_sizeP, muiP);
   } else {

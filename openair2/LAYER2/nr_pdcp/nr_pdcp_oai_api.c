@@ -289,7 +289,7 @@ static void do_pdcp_data_ind(const protocol_ctxt_t *const ctxt_pP,
   if (rb != NULL) {
 
     #if LATSEQ
-    if (g_latseq.is_running)
+    if (g_latseq.is_running && ctxt_pP->enb_flag)
     {
       if ((rb->type == NR_PDCP_DRB_AM || rb->type == NR_PDCP_DRB_UM)
           && sdu_buffer_size >= (rb->sn_size == 12 ? 2 : 3) + (rb->has_sdap_rx ? 1 : 0) + 20)
@@ -762,7 +762,8 @@ static void deliver_sdu_drb(void *_ue, nr_pdcp_entity_t *entity,
 
        // MODIF SDAP TS + infos
       #if LATSEQ
-      if (g_latseq.is_running && size >= (ue->drb[rb_id - 1]->has_sdap_rx ? 1 : 0) + 20)
+      if (g_latseq.is_running && entity->is_gnb
+          && size >= (ue->drb[rb_id - 1]->has_sdap_rx ? 1 : 0) + 20)
       {
           //check IP version
         uint8_t sdap_header_size = 0;
@@ -1411,6 +1412,11 @@ bool nr_pdcp_data_req_drb(protocol_ctxt_t *ctxt_pP,
     LOG_E(PDCP, "[UE %lx] DRB %ld not found\n", ue_id, rb_id);
     return 0;
   }
+
+#if LATSEQ
+  if (g_latseq.is_running && !ctxt_pP->enb_flag)
+    rb->latseq_ue_id = (uint32_t)ue_id;
+#endif
 
   int max_size = nr_max_pdcp_pdu_size(sdu_buffer_size);
   char pdu_buf[max_size];

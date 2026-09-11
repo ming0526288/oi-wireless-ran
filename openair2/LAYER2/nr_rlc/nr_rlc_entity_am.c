@@ -1666,6 +1666,25 @@ static int generate_tx_pdu(nr_rlc_entity_am_t *entity, char *buffer, int size)
     entity->tx_next = (entity->tx_next + 1) % entity->sn_modulus;
   }
 
+#if LATSEQ
+  if (g_latseq.is_running && entity->common.lcid > 2 && sdu->sdu->size >= 3) {
+    const uint8_t *pdcp_pdu = (const uint8_t *)sdu->sdu->data;
+    uint32_t pdcp_sn = ((uint32_t)(pdcp_pdu[0] & 0x03) << 16)
+                       | ((uint32_t)pdcp_pdu[1] << 8)
+                       | pdcp_pdu[2];
+    LATSEQ_P("U rlc.am.tx.pdu", "uid=%d,tbs=%d,slen=%d,sglen=%d,rhl=%d,plen=%d,so=%d,psn=%d,rsn=%d",
+             entity->common.rnti,
+             size,
+             sdu->sdu->size,
+             sdu->size,
+             pdu_header_size,
+             pdu_size,
+             sdu->so,
+             pdcp_sn,
+             sdu->sdu->sn);
+  }
+#endif
+
   /* segment if necessary */
   if (pdu_size > size) {
     nr_rlc_sdu_segment_t *next_sdu;

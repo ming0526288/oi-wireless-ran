@@ -31,6 +31,9 @@
 #include "nr_pdcp_sdu.h"
 
 #include "LOG/log.h"
+#if LATSEQ
+#include "common/utils/LATSEQ/latseq.h"
+#endif
 
 /**
  * @brief returns the maximum PDCP PDU size
@@ -298,6 +301,33 @@ static int nr_pdcp_entity_process_sdu(nr_pdcp_entity_t *entity,
   entity->stats.txpdu_pkts++;
   entity->stats.txpdu_bytes += header_size + size + integrity_size;
   entity->stats.txpdu_sn = sn;
+
+#if LATSEQ
+  if (g_latseq.is_running && !entity->is_gnb && dc_bit == 0x80
+      && size >= sdap_header_size + 20) {
+    const uint8_t *ip = (const uint8_t *)buffer + sdap_header_size;
+    uint8_t ip_type = ip[0] >> 4;
+    if (ip_type == 4) {
+      uint16_t ip_id = ((uint16_t)ip[4] << 8) | ip[5];
+      uint8_t ip_hdr_size = (ip[0] & 0x0f) * 4;
+      uint8_t protocol_id = ip[9];
+      int app_count_idx = ip_hdr_size + 16;
+      if (protocol_id == 17 && size - sdap_header_size >= app_count_idx + 8) {
+        uint32_t app_count = 0;
+        for (int i = app_count_idx + 4; i < app_count_idx + 8; ++i)
+          app_count = (app_count << 8) | ip[i];
+        LATSEQ_P("U pdcp.infos", "uid=%d,slen=%d,phl=%d,pil=%d,ipid=%d,ptid=%d,appc=%d,psn=%d",
+                 entity->latseq_ue_id, size, header_size, integrity_size, ip_id, protocol_id, app_count, sn);
+      } else {
+        LATSEQ_P("U pdcp.infos", "uid=%d,slen=%d,phl=%d,pil=%d,ipid=%d,ptid=%d,psn=%d",
+                 entity->latseq_ue_id, size, header_size, integrity_size, ip_id, protocol_id, sn);
+      }
+    } else {
+      LATSEQ_P("U pdcp.infos.ipv6", "uid=%d,slen=%d,phl=%d,psn=%d",
+               entity->latseq_ue_id, size, header_size, sn);
+    }
+  }
+#endif
 
   return header_size + size + integrity_size;
 }

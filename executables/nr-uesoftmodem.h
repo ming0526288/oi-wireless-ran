@@ -66,6 +66,7 @@
   {"num-ues",                      NULL,                       0,               .iptr=&(NB_UE_INST),                         .defuintval=1,     TYPE_INT,      0}, \
   {"ntn-koffset",                  CONFIG_HLP_NTN_KOFFSET,     0,               .uptr=&(nrUE_params.ntn_koffset),            .defuintval=0,     TYPE_UINT,     0}, \
   {"ntn-ta-common",                CONFIG_HLP_NTN_TA_COMMON,   0,               .dblptr=&(nrUE_params.ntn_ta_common),        .defdblval=0.0,    TYPE_DOUBLE,   0}, \
+  {"latseq_ul",                    CONFIG_LATSEQ_UL,           0,               .u8ptr=&latseq_ul,                           .defintval=0,      TYPE_UINT8,    0}, \
 }
 // clang-format on
 
@@ -92,6 +93,7 @@ typedef struct {
 extern uint64_t get_nrUE_optmask(void);
 extern uint64_t set_nrUE_optmask(uint64_t bitmask);
 extern nrUE_params_t *get_nrUE_params(void);
+extern uint8_t latseq_ul;
 
 
 // In nr-ue.c
