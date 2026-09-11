@@ -31,6 +31,10 @@
 #include "nr_pdcp_sdu.h"
 
 #include "LOG/log.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
 
 static void nr_pdcp_entity_recv_pdu(nr_pdcp_entity_t *entity,
                                     char *_buffer, int size)
@@ -247,6 +251,61 @@ static int nr_pdcp_entity_process_sdu(nr_pdcp_entity_t *entity,
   entity->stats.txpdu_pkts++;
   entity->stats.txpdu_bytes += header_size + size + integrity_size;
   entity->stats.txpdu_sn = sn;
+
+   // MODIF 2
+  #if LATSEQ
+    //check IP version
+    if (dc_bit == 0x80)
+    {
+      //IP info
+      uint8_t sdap_header_size = 0;
+      if (entity->has_sdap_tx) sdap_header_size = 1;
+      uint8_t ind = sdap_header_size;
+      unsigned char *sdu_buffer = (unsigned char *)buffer;// +1
+      uint8_t ip_type = sdu_buffer[ind] >> 4;
+      if (ip_type == 4)
+      {
+        ind = ind + 4;
+        uint8_t ind2 = sdap_header_size + 5;
+        uint16_t ip_id = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+        ind = sdap_header_size;
+        uint8_t ip_hdr_size = (sdu_buffer[ind] & 0x0f) * 4;
+        ind = sdap_header_size + 9;
+        uint8_t protocol_id = sdu_buffer[ind];
+
+        //UDP info
+        if (protocol_id == 17)
+        {
+          uint8_t udp_hdr_size = 8;
+          int full_hdr_size = ip_hdr_size + udp_hdr_size + sdap_header_size;
+          int app_count_idx = full_hdr_size+8;
+          uint8_t app_count_size_bytes = 8;
+          uint64_t app_count = 0;
+
+          for (int i = app_count_idx; i < app_count_idx+app_count_size_bytes; i++)
+          {
+            app_count = app_count << 8| sdu_buffer[i];
+          }
+
+          LATSEQ_P("D pdcp.infos","uid=%d,slen=%d,phl=%d,pil=%d,ipid=%d,ptid=%d,appc=%ld,psn=%d",
+                                          entity->rnti, size, header_size,
+                                          integrity_size,ip_id,protocol_id,app_count,
+                                          sn);
+        }
+        else
+        {
+          LATSEQ_P("D pdcp.infos","uid=%d,slen=%d,phl=%d,pil=%d,ipid=%d,ptid=%d,psn=%d",
+                                          entity->rnti, size, header_size,
+                                          integrity_size, ip_id, protocol_id, sn);
+        }
+      }
+      else
+      {
+        LATSEQ_P("D pdcp.infos.ipv6","uid=%d,slen=%d,phl=%d",
+                                          entity->rnti, size, header_size);
+      }
+    }
+  #endif
 
   return header_size + size + integrity_size;
 }

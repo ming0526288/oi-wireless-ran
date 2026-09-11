@@ -278,10 +278,15 @@ add_boolean_option(DEBUG_ASN1 False "Enable ASN1 debug logs" OFF)
 # OAI uses this feature to re-use OAI LOG_I(ASN1, ...)
 # see common/utils/config.h
 add_boolean_option(TRACE_ASN1C_ENC_DEC OFF "Enable ASN1 encoder/decoder debug traces via OAI logging system" ON)
-add_boolean_option(T_TRACER            True  "Activate the T tracer, a debugging/monitoring framework" ON)
+## MODIF LATSEQ : True before
+add_boolean_option(T_TRACER            False  "Activate the T tracer, a debugging/monitoring framework" ON)
+## MODIF LATSEQ
 add_boolean_option(UE_AUTOTEST_TRACE   False "Activate UE autotest specific logs" ON)
 add_boolean_option(UE_DEBUG_TRACE      False "Activate UE debug trace" ON)
 add_boolean_option(UE_TIMING_TRACE     False "Activate UE timing trace" ON)
+## MODIF LATSEQ : new
+add_boolean_option(LATSEQ              False "Active Latency Sequence tools" ON)
+## MODIF LATSEQ
 
 set (OCP_ITTI ${OPENAIR_DIR}/common/utils/ocp_itti)
 add_library(ITTI ${OCP_ITTI}/intertask_interface.cpp)
@@ -644,9 +649,11 @@ add_library(HASHTABLE
 )
 include_directories(${OPENAIR_DIR}/common/utils/hashtable)
 
+## MODIF LATSEQ : new (latseq.c)
 add_library(UTIL
   ${OPENAIR_DIR}/common/utils/LOG/log.c
   ${OPENAIR_DIR}/common/utils/LOG/vcd_signal_dumper.c
+  ${OPENAIR_DIR}/common/utils/LATSEQ/latseq.c
   ${OPENAIR2_DIR}/UTIL/MATH/oml.c
   ${OPENAIR2_DIR}/UTIL/OPT/probe.c
   ${OPENAIR_DIR}/common/utils/threadPool/thread-pool.c
@@ -1168,6 +1175,7 @@ add_library(PHY_RU ${PHY_SRC_RU})
 target_link_libraries(PHY_RU PRIVATE asn1_lte_rrc_hdrs)
 
 #Library for mex functions
+## MODIF LATSEQ : new (latseq.c)
 #########################3
 set(PHY_MEX_UE
   ${OPENAIR1_DIR}/PHY/LTE_UE_TRANSPORT/linear_preprocessing_rec.c
@@ -1186,6 +1194,7 @@ set(PHY_MEX_UE
   ${OPENAIR1_DIR}/PHY/LTE_UE_TRANSPORT/dlsch_llr_computation_avx2.c
   ${OPENAIR1_DIR}/PHY/LTE_ESTIMATION/lte_ue_measurements.c
   ${OPENAIR_DIR}/common/utils/LOG/log.c
+  ${OPENAIR_DIR}/common/utils/LATSEQ/latseq.c
   )
 add_library(PHY_MEX ${PHY_MEX_UE})
 target_link_libraries(PHY_MEX PRIVATE asn1_lte_rrc_hdrs)

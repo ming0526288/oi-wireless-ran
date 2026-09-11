@@ -167,6 +167,10 @@ typedef struct nr_pdcp_entity_t {
   // 4- The ITTI task, forwards the message ciphering (e.g., nea2) it. 
   // 5- The gNB cannot understand the ciphered Security Mode Complete message.
   bool security_mode_completed;
+
+  //MODIF
+  int rnti;
+  int pdcp_sn;
 } nr_pdcp_entity_t;
 
 nr_pdcp_entity_t *new_nr_pdcp_entity(

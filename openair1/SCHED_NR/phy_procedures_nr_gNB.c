@@ -43,6 +43,10 @@
 #include "assertions.h"
 
 #include <time.h>
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
 
 //#define DEBUG_RXDATA
 //#define SRS_IND_DEBUG
@@ -289,6 +293,15 @@ static void nr_postDecode(PHY_VARS_gNB *gNB, notifiedFIFO_elt_t *req)
       ulsch->active = false;
       ulsch_harq->round = 0;
       LOG_D(PHY, "ULSCH received ok \n");
+
+      // MODIF PHY infos
+      #if LATSEQ
+      if (latseq_ul)
+      {
+        LATSEQ_P("U phy.ok","rnti=%d,sfn=%d,slot=%d,hpid=%d,rnd=%d,tbs=%d",
+                ulsch->rnti,ulsch->frame,ulsch->slot,rdata->harq_pid,ulsch_harq->round,ulsch_harq->TBS);
+      }
+      #endif
       nr_fill_indication(gNB, ulsch->frame, ulsch->slot, rdata->ulsch_id, rdata->harq_pid, 0, 0);
       //dumpsig=1;
     } else {
@@ -309,6 +322,14 @@ static void nr_postDecode(PHY_VARS_gNB *gNB, notifiedFIFO_elt_t *req)
             r);
       ulsch->handled = 1;
       LOG_D(PHY, "ULSCH %d in error\n",rdata->ulsch_id);
+      // MODIF PHY infos
+      #if LATSEQ
+      if (latseq_ul)
+      {
+        LATSEQ_P("U phy.nok","rnti=%d,sfn=%d,slot=%d,hpid=%d,rnd=%d,tbs=%d",
+                ulsch->rnti,ulsch->frame,ulsch->slot,rdata->harq_pid,ulsch_harq->round,ulsch_harq->TBS);
+      }
+      #endif
       nr_fill_indication(gNB, ulsch->frame, ulsch->slot, rdata->ulsch_id, rdata->harq_pid, 1, 0);
       //      dumpsig=1;
     }

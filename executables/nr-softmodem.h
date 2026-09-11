@@ -31,6 +31,7 @@
   {"usrp-tx-thread-config", CONFIG_HLP_USRP_THREAD,    0,                .iptr=&usrp_tx_thread,               .defstrval=0,                     TYPE_INT,    0},        \
   {"uecap_file",            CONFIG_HLP_UECAP_FILE,     0,                .strptr=&uecap_file,                 .defstrval="./uecap_ports1.xml",  TYPE_STRING, 0},        \
   {"s" ,                    CONFIG_HLP_SNR,            0,                .dblptr=&snr_dB,                     .defdblval=25,                    TYPE_DOUBLE, 0},        \
+  {"latseq_ul",             CONFIG_LATSEQ_UL,   0,                       .uptr=&latseq_ul,                   .defintval=0,                    TYPE_UINT8,  0},        \
 }
 // clang-format on
 
@@ -44,6 +45,8 @@ extern uint64_t dlsch_slot_bitmap;
 extern uint64_t ulsch_slot_bitmap;
 extern char *uecap_file;
 
+//MODIF LATSEQ SIDE
+extern uint32_t latseq_ul;
 // In nr-gnb.c
 extern void init_gNB(int single_thread_flag,int wait_for_sync);
 extern void stop_gNB(int);

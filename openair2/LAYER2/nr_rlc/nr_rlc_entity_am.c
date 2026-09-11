@@ -28,6 +28,15 @@
 
 #include "LOG/log.h"
 #include "common/utils/time_stat.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  #include "executables/nr-softmodem.h"
+#endif
+//MODIF
+//#include "executables/softmodem-common.h"
+//#include "executables/nr-softmodem-common.h"
+//#include "executables/nr-softmodem.h"
 
 /* for a given SDU/SDU segment, computes the corresponding PDU header size */
 static int compute_pdu_header_size(nr_rlc_entity_am_t *entity,
@@ -219,6 +228,13 @@ static void reassemble_and_deliver(nr_rlc_entity_am_t *entity, int sn)
     return;
 
   /* deliver */
+  //MODIF PDCP infos
+  #if LATSEQ
+    if (entity->common.lcid > 2)
+    {
+      entity->common.rlc_sn = sn;
+    }
+  #endif
   entity->common.deliver_sdu(entity->common.deliver_sdu_data,
                              (nr_rlc_entity_t *)entity,
                              sdu, so);
@@ -840,7 +856,22 @@ void nr_rlc_entity_am_recv_pdu(nr_rlc_entity_t *_entity,
 
   /* do reception actions (38.322 5.2.3.2.3) */
   reception_actions(entity, pdu);
+  //MODIF
+  #if LATSEQ
+    if (latseq_ul && entity->common.lcid > 2)
+    {
+      int rlc_header_size = size - data_size;
+      unsigned char *sdu_buffer = (unsigned char *)buffer + rlc_header_size;
+      //uint8_t dc_bit = sdu_buffer[0] >> 3;
+      uint32_t pdcp_sn = sdu_buffer[0] << ((8*3) + 4);
+      pdcp_sn = pdcp_sn >> 12;
+      pdcp_sn = pdcp_sn | sdu_buffer[1] << 8;
+      pdcp_sn = pdcp_sn | sdu_buffer[2];
 
+      LATSEQ_P("U rlc.am.recv","uid=%d,isf=%d,isl=%d,so=%d,pollb=%d,len=%d,rsn=%d,psn=%d",
+                                entity->common.rnti,is_first, is_last, so, p, data_size, sn, pdcp_sn);
+    }
+  #endif
   if (p) {
     /* 38.322 5.3.4 says status triggering should be delayed
      * until x < rx_highest_status or x >= rx_next + am_window_size.

@@ -52,6 +52,8 @@
 extern int asn_debug;
 extern int asn1_xer_print;
 
+#define CONFIG_LATSEQ_UL        "To logs UL encapsulation\n"
+
 #ifdef LIBCONFIG_LONG
 #define libconfig_int long
 #else

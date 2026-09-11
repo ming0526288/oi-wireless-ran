@@ -85,7 +85,13 @@ unsigned short config_frames[4] = {2,9,11,13};
 #include "openair2/E2AP/flexric/src/agent/e2_agent_api.h"
 #include "openair2/E2AP/RAN_FUNCTION/init_ran_func.h"
 #endif
+// MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
 
+//MODIF LATSEQ SIDE
+uint32_t latseq_ul;
 
 pthread_cond_t nfapi_sync_cond;
 pthread_mutex_t nfapi_sync_mutex;
@@ -667,6 +673,10 @@ int main( int argc, char **argv ) {
   }
 
   cpuf=get_cpu_freq_GHz();
+  // MODIF 2
+  #if LATSEQ
+    init_latseq("/tmp/nr_softmodem", (uint64_t)(cpuf*1000000000LL));
+  #endif
   itti_init(TASK_MAX, tasks_info);
   // initialize mscgen log after ITTI
   init_opt();
@@ -815,6 +825,11 @@ int main( int argc, char **argv ) {
   printf("Returned from ITTI signal handler\n");
   oai_exit=1;
   printf("oai_exit=%d\n",oai_exit);
+
+  // MODIF 3
+  #if LATSEQ
+    close_latseq();
+  #endif
 
   // cleanup
   if (RC.nb_nr_L1_inst > 0)
