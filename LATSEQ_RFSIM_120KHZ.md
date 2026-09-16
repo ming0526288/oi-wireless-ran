@@ -99,15 +99,16 @@ RFsim uplink `t12-t1` mean was 0.797 ms, median 0.748 ms, minimum 0.567 ms, and
 maximum 1.206 ms.  RFsim timing is a functional baseline, not a substitute for
 the later DPDK/USRP latency measurement.
 
-## RLC control-PDU stall fix
+## Known idle-resume limitation
 
-On 2026-09-16 an intermittent 120 kHz failure was reproduced in which the UE
-registered and created `oaitun_ue1`, but ping had 100% packet loss.  LatSeq
-showed that IPv4 packets reached UE RLC but did not continue to UE MAC.  The
-RLC control-PDU entry block from upstream OAI commit `698b5e3dcf` was
-backported to `nr_rlc_entity_am_recv_pdu()`.  With that backport, a clean
-10-packet run had 0% loss and all 10 `t1-t12` paths passed validation.
+On 2026-09-16 an idle-resume failure was reproduced in this old 2024-w29 fork:
+an immediate ping after UE registration completed, while packets sent after a
+long idle period could reach UE RLC but remain unavailable to UE MAC.  PHY kept
+processing empty PUSCH grants, so repeated `UL AMP` output is not the fault and
+restarting the 5GC does not repair this UE-side state.
 
-The verified post-fix run had a ping RTT mean of 1.103 ms and an uplink
-`t12-t1` mean of 0.689 ms (median 0.705 ms, minimum 0.511 ms, maximum
-0.815 ms).
+The previously suspected RLC control-PDU change was only a debug log and was
+removed; it was not a valid fix.  Until the later upstream RLC/MAC concurrency
+changes can be ported as a coherent set, run a measurement immediately after
+the tunnel appears.  For independent batches, restart the UE before each batch.
+Do not combine packets from a failed idle-resume run with latency results.
