@@ -98,3 +98,16 @@ The smoke test performed on 2026-09-11 completed 10 of 10 packet paths.  Its
 RFsim uplink `t12-t1` mean was 0.797 ms, median 0.748 ms, minimum 0.567 ms, and
 maximum 1.206 ms.  RFsim timing is a functional baseline, not a substitute for
 the later DPDK/USRP latency measurement.
+
+## RLC control-PDU stall fix
+
+On 2026-09-16 an intermittent 120 kHz failure was reproduced in which the UE
+registered and created `oaitun_ue1`, but ping had 100% packet loss.  LatSeq
+showed that IPv4 packets reached UE RLC but did not continue to UE MAC.  The
+RLC control-PDU entry block from upstream OAI commit `698b5e3dcf` was
+backported to `nr_rlc_entity_am_recv_pdu()`.  With that backport, a clean
+10-packet run had 0% loss and all 10 `t1-t12` paths passed validation.
+
+The verified post-fix run had a ping RTT mean of 1.103 ms and an uplink
+`t12-t1` mean of 0.689 ms (median 0.705 ms, minimum 0.511 ms, maximum
+0.815 ms).

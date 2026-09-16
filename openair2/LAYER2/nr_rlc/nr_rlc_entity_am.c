@@ -775,8 +775,10 @@ void nr_rlc_entity_am_recv_pdu(nr_rlc_entity_t *_entity,
   nr_rlc_pdu_decoder_init(&decoder, buffer, size);
   dc = nr_rlc_pdu_decoder_get_bits(&decoder, 1); R(decoder);
 
-  if (dc == 0)
+  if (dc == 0) {
+    LOG_D(RLC, "RLC received control PDU\n");
     return process_control_pdu(entity, buffer, size);
+  }
 
   /* data PDU */
   p  = nr_rlc_pdu_decoder_get_bits(&decoder, 1); R(decoder);
