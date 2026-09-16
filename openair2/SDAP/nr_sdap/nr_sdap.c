@@ -20,6 +20,9 @@
  */
 
 #include "nr_sdap.h"
+#if LATSEQ
+#include "common/utils/LATSEQ/latseq.h"
+#endif
 
 uint8_t nas_qfi;
 uint8_t nas_pduid;
@@ -40,6 +43,32 @@ bool sdap_data_req(protocol_ctxt_t *ctxt_p,
                    const int pdusession_id) {
   nr_sdap_entity_t *sdap_entity;
   sdap_entity = nr_sdap_get_entity(ue_id, pdusession_id);
+
+#if LATSEQ
+  if (g_latseq.is_running && !ctxt_p->enb_flag && sdu_buffer_size >= 20) {
+    uint8_t ip_type = sdu_buffer[0] >> 4;
+    if (ip_type == 4) {
+      uint16_t ip_id = ((uint16_t)sdu_buffer[4] << 8) | sdu_buffer[5];
+      uint8_t ip_hdr_size = (sdu_buffer[0] & 0x0f) * 4;
+      uint8_t protocol_id = sdu_buffer[9];
+      int app_count_idx = ip_hdr_size + 16;
+      if (protocol_id == 17 && sdu_buffer_size >= app_count_idx + 8) {
+        uint16_t sp = ((uint16_t)sdu_buffer[ip_hdr_size] << 8) | sdu_buffer[ip_hdr_size + 1];
+        uint16_t dp = ((uint16_t)sdu_buffer[ip_hdr_size + 2] << 8) | sdu_buffer[ip_hdr_size + 3];
+        uint32_t app_count = 0;
+        for (int i = app_count_idx + 4; i < app_count_idx + 8; ++i)
+          app_count = (app_count << 8) | sdu_buffer[i];
+        LATSEQ_P("U sdap.ts", "uid=%d,rbid=%d,slen=%d,ipt=%d,iphl=%d,ptid=%d,appc=%d,ipid=%d,sp=%d,dp=%d",
+                 ue_id, rb_id, sdu_buffer_size, ip_type, ip_hdr_size, protocol_id, app_count, ip_id, sp, dp);
+      } else {
+        LATSEQ_P("U sdap.ts", "uid=%d,rbid=%d,slen=%d,ipt=%d,iphl=%d,ptid=%d,ipid=%d",
+                 ue_id, rb_id, sdu_buffer_size, ip_type, ip_hdr_size, protocol_id, ip_id);
+      }
+    } else {
+      LATSEQ_P("U sdap.ts.ipv6", "uid=%d,rbid=%d,slen=%d,ipt=%d", ue_id, rb_id, sdu_buffer_size, ip_type);
+    }
+  }
+#endif
 
   if(sdap_entity == NULL) {
     LOG_E(SDAP, "%s:%d:%s: Entity not found with ue: 0x%"PRIx64" and pdusession id: %d\n", __FILE__, __LINE__, __FUNCTION__, ue_id, pdusession_id);

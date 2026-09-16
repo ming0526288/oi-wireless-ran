@@ -177,6 +177,9 @@ typedef struct nr_pdcp_entity_t {
 
   /* Keep tracks of whether the PDCP entity was suspended or not */
   bool entity_suspended;
+#if LATSEQ
+  uint32_t latseq_ue_id;
+#endif
 } nr_pdcp_entity_t;
 
 nr_pdcp_entity_t *new_nr_pdcp_entity(

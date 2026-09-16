@@ -86,6 +86,9 @@ unsigned short config_frames[4] = {2,9,11,13};
 #include "nr_nas_msg_sim.h"
 #include <openair1/PHY/MODULATION/nr_modulation.h>
 #include "openair2/GNB_APP/gnb_paramdef.h"
+#if LATSEQ
+#include "common/utils/LATSEQ/latseq.h"
+#endif
 
 extern const char *duplex_mode[];
 THREAD_STRUCT thread_struct;
@@ -109,6 +112,7 @@ int get_node_type() {return -1;}
 
 RAN_CONTEXT_t RC;
 int oai_exit = 0;
+uint8_t latseq_ul;
 
 
 static int      tx_max_power[MAX_NUM_CCs] = {0};
@@ -444,6 +448,12 @@ int main(int argc, char **argv)
           "no SYS_NICE capability: cannot set thread priority and affinity, consider running with sudo for optimum performance\n");
 
   cpuf=get_cpu_freq_GHz();
+#if LATSEQ
+  if (latseq_ul && init_latseq("/tmp/nr_uesoftmodem", (uint64_t)(cpuf * 1000000000LL)) < 0) {
+    LOG_E(UTIL, "Failed to initialize LatSeq; disabling UL latency tracing\n");
+    latseq_ul = 0;
+  }
+#endif
   itti_init(TASK_MAX, tasks_info);
 
   init_opt();
@@ -584,6 +594,11 @@ int main(int argc, char **argv)
   oai_exit=1;
   printf("oai_exit=%d\n",oai_exit);
 
+#if LATSEQ
+  if (latseq_ul)
+    close_latseq();
+#endif
+
   if (ouput_vcd)
     vcd_signal_dumper_close();
 
@@ -597,4 +612,3 @@ int main(int argc, char **argv)
 
   return 0;
 }
-

@@ -43,6 +43,11 @@
 #include "gnb_config.h"
 #include "executables/softmodem-common.h"
 #include "cuup_cucp_if.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+  //#include "openair2/GNB_APP/gnb_paramdef.h"
+#endif
 
 #define TODO do { \
     printf("%s:%d:%s: todo\n", __FILE__, __LINE__, __FUNCTION__); \
@@ -282,7 +287,80 @@ static void do_pdcp_data_ind(const protocol_ctxt_t *const ctxt_pP,
   rb = nr_pdcp_get_rb(ue, rb_id, srb_flagP);
 
   if (rb != NULL) {
+
+    #if LATSEQ
+    if (g_latseq.is_running && ctxt_pP->enb_flag)
+    {
+      if ((rb->type == NR_PDCP_DRB_AM || rb->type == NR_PDCP_DRB_UM)
+          && sdu_buffer_size >= (rb->sn_size == 12 ? 2 : 3) + (rb->has_sdap_rx ? 1 : 0) + 20)
+      {
+        uint8_t sdap_header_size = 0;
+        uint8_t pdcp_header_size = 0;
+        int pdcp_sn = -1;
+
+        if (rb->sn_size == 12) {
+          pdcp_sn = ((sdu_buffer[0] & 0xf) <<  8) |
+                      sdu_buffer[1];
+          pdcp_header_size = 2;
+        } else {
+          pdcp_sn = ((sdu_buffer[0] & 0x3) << 16) |
+                    (sdu_buffer[1]        <<  8) |
+                      sdu_buffer[2];
+          pdcp_header_size = 3;
+        }
+
+        if (rb->has_sdap_rx) sdap_header_size = 1;
+        uint8_t ind = sdap_header_size + pdcp_header_size;
+        uint8_t ip_type = sdu_buffer[ind] >> 4;
+        //unsigned char *sdu_buffer = buf;// +1
+        if (ip_type == 4)
+        {
+
+          ind = ind + 4;
+          uint8_t ind2 = sdap_header_size + pdcp_header_size + 5;
+          uint16_t ip_id = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+          ind = sdap_header_size + pdcp_header_size;
+          uint8_t ip_hdr_size = (sdu_buffer[ind] & 0x0f) * 4;
+          ind = sdap_header_size + pdcp_header_size + 9;
+          uint8_t protocol_id = sdu_buffer[ind];
+
+          //UDP info
+          uint8_t udp_hdr_size = 8;
+          int full_hdr_size = ip_hdr_size + udp_hdr_size + sdap_header_size + pdcp_header_size;
+          int app_count_idx = full_hdr_size + 8;
+          if (protocol_id == 17 && sdu_buffer_size >= app_count_idx + 8)
+          {
+            uint8_t app_count_size_bytes = 8;
+            uint64_t app_count = 0;
+
+            for (int i = app_count_idx; i < app_count_idx+app_count_size_bytes; i++)
+            {
+              app_count = app_count << 8| sdu_buffer[i];
+            }
+
+
+            LATSEQ_P("U pdcp.ts","uid=%d,uid2=%d,rid=%d,plen=%d,psn=%d,ipid=%d,appc=%d",
+                                        UEid, ue->ue_id, rb_id, sdu_buffer_size, pdcp_sn,ip_id, app_count);
+          }
+          else
+          {
+            LATSEQ_P("U pdcp.ts","uid=%d,uid2=%d,rid=%d,plen=%d,psn=%d,ipid=%d",
+                                        UEid, ue->ue_id, rb_id, sdu_buffer_size, pdcp_sn,ip_id);
+          }
+        }
+        else
+        {
+          LATSEQ_P("U pdcp.ts.ipv6","uid=%d,uid2=%d,rid=%d,plen=%d,psn=%d",
+                                      UEid, ue->ue_id, rb_id, sdu_buffer_size, pdcp_sn);
+        }
+      }
+    }
+    #endif
+
     rb->recv_pdu(rb, (char *)sdu_buffer, sdu_buffer_size);
+
+
   } else {
     LOG_E(PDCP, "pdcp_data_ind: no RB found (rb_id %ld, srb_flag %d)\n", rb_id, srb_flagP);
   }
@@ -681,6 +759,63 @@ static void deliver_sdu_drb(void *_ue, nr_pdcp_entity_t *entity,
     rb_found:
     {
       LOG_D(PDCP, "%s() (drb %d) sending message to SDAP size %d\n", __func__, rb_id, size);
+
+       // MODIF SDAP TS + infos
+      #if LATSEQ
+      if (g_latseq.is_running && entity->is_gnb
+          && size >= (ue->drb[rb_id - 1]->has_sdap_rx ? 1 : 0) + 20)
+      {
+          //check IP version
+        uint8_t sdap_header_size = 0;
+        if (ue->drb[rb_id - 1]->has_sdap_rx) sdap_header_size = 1;
+        uint8_t ind = sdap_header_size;
+        unsigned char *sdu_buffer = (unsigned char *)buf;// +1
+        uint8_t ip_type = sdu_buffer[ind] >> 4;
+        if (ip_type == 4)
+        {
+          ind = ind + 4;
+          uint8_t ind2 = sdap_header_size + 5;
+          uint16_t ip_id = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+          ind = sdap_header_size;
+          uint8_t ip_hdr_size = (sdu_buffer[ind] & 0x0f) * 4;
+          ind = sdap_header_size + 9;
+          uint8_t protocol_id = sdu_buffer[ind];
+          //UDP info
+          uint8_t udp_hdr_size = 8;
+          int full_hdr_size = ip_hdr_size + udp_hdr_size + sdap_header_size;
+          int app_count_idx = full_hdr_size + 8;
+          if (protocol_id == 17 && size >= app_count_idx + 8)
+          {
+            uint8_t app_count_size_bytes = 8;
+            uint64_t app_count = 0;
+            ind = sdap_header_size + ip_hdr_size;
+            ind2 = sdap_header_size + ip_hdr_size + 1;
+            uint16_t sp = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+            ind = sdap_header_size + ip_hdr_size + 2;
+            ind2 = sdap_header_size + ip_hdr_size + 3;
+            uint16_t dp = sdu_buffer[ind] << 8 | sdu_buffer[ind2];
+
+            for (int i = app_count_idx; i < app_count_idx+app_count_size_bytes; i++)
+            {
+              app_count = app_count << 8| sdu_buffer[i];
+            }
+
+            LATSEQ_P("U sdap.ts.infos","uid=%d,rid=%d,slen=%d,ptid=%d,ipid=%d,appc=%d,sp=%d,dp=%d",
+                                        ue->ue_id, rb_id,size,protocol_id, ip_id, app_count,
+                                        sp, dp);
+          }
+          else
+          {
+            LATSEQ_P("U sdap.ts.infos","uid=%d,rid=%d,slen=%d,ptid=%d,ipid=%d", ue->ue_id, rb_id, size, protocol_id, ip_id);
+          }
+        }
+        else
+        {
+          LATSEQ_P("U sdap.ts.infos.ipv6","uid=%d,rid=%d,slen=%d", ue->ue_id, rb_id, size);
+        }
+      }
+      #endif
       sdap_data_ind(rb_id,
                     ue->drb[rb_id - 1]->is_gnb,
                     ue->drb[rb_id - 1]->has_sdap_rx,
@@ -1277,6 +1412,11 @@ bool nr_pdcp_data_req_drb(protocol_ctxt_t *ctxt_pP,
     LOG_E(PDCP, "[UE %lx] DRB %ld not found\n", ue_id, rb_id);
     return 0;
   }
+
+#if LATSEQ
+  if (g_latseq.is_running && !ctxt_pP->enb_flag)
+    rb->latseq_ue_id = (uint32_t)ue_id;
+#endif
 
   int max_size = nr_max_pdcp_pdu_size(sdu_buffer_size);
   char pdu_buf[max_size];

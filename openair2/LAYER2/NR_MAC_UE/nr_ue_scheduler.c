@@ -54,6 +54,9 @@
 
 #include "LAYER2/NR_MAC_COMMON/nr_mac_extern.h"
 #include "LAYER2/RLC/rlc.h"
+#if LATSEQ
+#include "common/utils/LATSEQ/latseq.h"
+#endif
 
 //#define SRS_DEBUG
 #define verifyMutex(a)                                                \
@@ -3162,6 +3165,18 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
     header->F = 1;
     header->LCID = lcid;
     header->L = htons(sdu_length);
+
+#if LATSEQ
+    if (g_latseq.is_running && lcid > 2 && sdu_length >= 3) {
+      const uint8_t *rlc_pdu = *pdu;
+      uint8_t dc_bit = rlc_pdu[0] >> 7;
+      uint32_t rlc_sn = ((uint32_t)(rlc_pdu[0] & 0x03) << 16)
+                        | ((uint32_t)rlc_pdu[1] << 8)
+                        | rlc_pdu[2];
+      LATSEQ_P("U mac.ts", "rnti=%d,uid=%d,sfn=%d,slot=%d,lcid=%d,sdulen=%d,dc=%d,rsn=%d",
+               mac->crnti, mac->ue_id, frame, slot, lcid, sdu_length, dc_bit, rlc_sn);
+    }
+#endif
 
 #ifdef ENABLE_MAC_PAYLOAD_DEBUG
     LOG_I(NR_MAC, "dumping MAC sub-header with length %d: \n", sh_size);

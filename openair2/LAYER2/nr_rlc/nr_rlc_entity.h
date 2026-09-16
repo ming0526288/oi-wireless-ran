@@ -25,6 +25,9 @@
 #include <stdint.h>
 
 #include "common/utils/time_stat.h"
+//MODIF START
+#include "common/platform_types.h"
+//MODIF END
 
 #define NR_SDU_MAX 16000   /* max NR PDCP SDU size is 9000, let's take more */
 
@@ -138,6 +141,10 @@ typedef struct nr_rlc_entity_t {
   nr_rlc_statistics_t stats;
   time_average_t *txsdu_avg_time_to_tx;
   int             avg_time_is_on;
+  //MODIF START
+  logical_chan_id_t lcid;
+  int rnti;
+  //MODIF END
 } nr_rlc_entity_t;
 
 nr_rlc_entity_t *new_nr_rlc_entity_am(

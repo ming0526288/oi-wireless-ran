@@ -28,6 +28,14 @@
 
 #include "LOG/log.h"
 #include "common/utils/time_stat.h"
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
+//MODIF
+//#include "executables/softmodem-common.h"
+//#include "executables/nr-softmodem-common.h"
+//#include "executables/nr-softmodem.h"
 
 /* for a given SDU/SDU segment, computes the corresponding PDU header size */
 static int compute_pdu_header_size(nr_rlc_entity_am_t *entity,
@@ -840,7 +848,22 @@ void nr_rlc_entity_am_recv_pdu(nr_rlc_entity_t *_entity,
 
   /* do reception actions (38.322 5.2.3.2.3) */
   reception_actions(entity, pdu);
+  //MODIF
+  #if LATSEQ
+    if (g_latseq.is_running && entity->common.lcid > 2 && data_size >= 3)
+    {
+      int rlc_header_size = size - data_size;
+      unsigned char *sdu_buffer = (unsigned char *)buffer + rlc_header_size;
+      //uint8_t dc_bit = sdu_buffer[0] >> 3;
+      uint32_t pdcp_sn = sdu_buffer[0] << ((8*3) + 4);
+      pdcp_sn = pdcp_sn >> 12;
+      pdcp_sn = pdcp_sn | sdu_buffer[1] << 8;
+      pdcp_sn = pdcp_sn | sdu_buffer[2];
 
+      LATSEQ_P("U rlc.am.recv","uid=%d,isf=%d,isl=%d,so=%d,pollb=%d,len=%d,rsn=%d,psn=%d",
+                                entity->common.rnti,is_first, is_last, so, p, data_size, sn, pdcp_sn);
+    }
+  #endif
   if (p) {
     /* 38.322 5.3.4 says status triggering should be delayed
      * until x < rx_highest_status or x >= rx_next + am_window_size.
@@ -1642,6 +1665,25 @@ static int generate_tx_pdu(nr_rlc_entity_am_t *entity, char *buffer, int size)
     sdu->sdu->sn = entity->tx_next;
     entity->tx_next = (entity->tx_next + 1) % entity->sn_modulus;
   }
+
+#if LATSEQ
+  if (g_latseq.is_running && entity->common.lcid > 2 && sdu->sdu->size >= 3) {
+    const uint8_t *pdcp_pdu = (const uint8_t *)sdu->sdu->data;
+    uint32_t pdcp_sn = ((uint32_t)(pdcp_pdu[0] & 0x03) << 16)
+                       | ((uint32_t)pdcp_pdu[1] << 8)
+                       | pdcp_pdu[2];
+    LATSEQ_P("U rlc.am.tx.pdu", "uid=%d,tbs=%d,slen=%d,sglen=%d,rhl=%d,plen=%d,so=%d,psn=%d,rsn=%d",
+             entity->common.rnti,
+             size,
+             sdu->sdu->size,
+             sdu->size,
+             pdu_header_size,
+             pdu_size,
+             sdu->so,
+             pdcp_sn,
+             sdu->sdu->sn);
+  }
+#endif
 
   /* segment if necessary */
   if (pdu_size > size) {

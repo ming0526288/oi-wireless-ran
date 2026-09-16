@@ -41,6 +41,11 @@
 #include "openair2/F1AP/f1ap_du_rrc_message_transfer.h"
 #include "openair2/F1AP/f1ap_ids.h"
 
+//MODIF 1
+#if LATSEQ
+  #include "common/utils/LATSEQ/latseq.h"
+#endif
+
 extern RAN_CONTEXT_t RC;
 
 #include <stdint.h>
@@ -167,6 +172,13 @@ void mac_rlc_data_ind(const module_id_t  module_idP,
   if (rb != NULL) {
     LOG_D(RLC, "RB found! (channel ID %d) \n", channel_idP);
     rb->set_time(rb, nr_rlc_current_time);
+    #if LATSEQ
+    if (g_latseq.is_running)
+    {
+      rb->rnti = ue_id;
+      rb->lcid = channel_idP;
+    }
+    #endif
     rb->recv_pdu(rb, buffer_pP, tb_sizeP);
   } else {
     LOG_E(RLC, "Fatal: no RB found (channel ID %d UE ID %d)\n", channel_idP, ue_id);
@@ -199,6 +211,12 @@ tbs_size_t mac_rlc_data_req(const module_id_t  module_idP,
     LOG_D(RLC, "MAC PDU to get created for channel_idP:%d \n", channel_idP);
     rb->set_time(rb, nr_rlc_current_time);
     maxsize = tb_sizeP;
+#if LATSEQ
+    if (g_latseq.is_running && !enb_flagP) {
+      rb->rnti = ue_id;
+      rb->lcid = channel_idP;
+    }
+#endif
     ret = rb->generate_pdu(rb, buffer_pP, maxsize);
   } else {
     LOG_D(RLC, "MAC PDU failed to get created for channel_idP:%d \n", channel_idP);
@@ -345,6 +363,16 @@ rlc_op_status_t rlc_data_req(const protocol_ctxt_t *const ctxt_pP,
   }
 
   if (rb != NULL) {
+#if LATSEQ
+    if (g_latseq.is_running && !ctxt_pP->enb_flag && !srb_flagP && sdu_sizeP >= 3) {
+      rb->rnti = ue_id;
+      const uint8_t *pdcp_pdu = sdu_pP;
+      uint32_t pdcp_sn = ((uint32_t)(pdcp_pdu[0] & 0x03) << 16)
+                         | ((uint32_t)pdcp_pdu[1] << 8)
+                         | pdcp_pdu[2];
+      LATSEQ_P("U rlc.ts", "ueid=%d,psn=%d", ue_id, pdcp_sn);
+    }
+#endif
     rb->set_time(rb, nr_rlc_current_time);
     rb->recv_sdu(rb, (char *)sdu_pP, sdu_sizeP, muiP);
   } else {
@@ -819,12 +847,19 @@ static void add_drb_am(int ue_id, int drb_id, const NR_RLC_BearerConfig_t *rlc_B
   case NR_RLC_Config_PR_am: {
     struct NR_RLC_Config__am *am;
     am = r->choice.am;
+
     t_reassembly       = decode_t_reassembly(am->dl_AM_RLC.t_Reassembly);
     t_status_prohibit  = decode_t_status_prohibit(am->dl_AM_RLC.t_StatusProhibit);
     t_poll_retransmit  = decode_t_poll_retransmit(am->ul_AM_RLC.t_PollRetransmit);
     poll_pdu           = decode_poll_pdu(am->ul_AM_RLC.pollPDU);
     poll_byte          = decode_poll_byte(am->ul_AM_RLC.pollByte);
     max_retx_threshold = decode_max_retx_threshold(am->ul_AM_RLC.maxRetxThreshold);
+
+    #if LATSEQ
+    if (g_latseq.is_running)
+      LATSEQ_P("D rlc.create.conf","pbp=%d,pbv=%d", am->ul_AM_RLC.pollByte, poll_byte);
+    #endif
+
     if (*am->dl_AM_RLC.sn_FieldLength != *am->ul_AM_RLC.sn_FieldLength) {
       LOG_E(RLC, "%s:%d:%s: fatal\n", __FILE__, __LINE__, __FUNCTION__);
       exit(1);
