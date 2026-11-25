@@ -1728,7 +1728,7 @@ static bool allocate_ul_retransmission(gNB_MAC_INST *nrmac,
   /* no need to recompute the TBS, it will be the same */
 
   /* Mark the corresponding RBs as used */
-  n_rb_sched -= sched_pusch->rbSize;
+  *n_rb_sched -= sched_pusch->rbSize;
   for (int rb = 0; rb < sched_ctrl->sched_pusch.rbSize; rb++)
     rballoc_mask[rb + sched_ctrl->sched_pusch.rbStart] ^= SL_to_bitmap(sched_pusch->tda_info.startSymbolIndex, sched_pusch->tda_info.nrOfSymbols);
   return true;
