@@ -40,6 +40,7 @@
 
 /* MAC */
 #include "NR_MAC_COMMON/nr_mac.h"
+#include "NR_MAC_COMMON/nr_mac_sdu.h"
 #include "NR_MAC_COMMON/nr_mac_common.h"
 #include "NR_MAC_UE/mac_proto.h"
 #include "NR_MAC_UE/mac_extern.h"
@@ -3090,8 +3091,6 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
                          bool *lcids_data_status,
                          uint8_t *num_lcids_same_priority)
 {
-  const uint8_t sh_size = sizeof(NR_MAC_SUBHEADER_LONG);
-
   /* prepare the MAC sdu */
   NR_LC_SCHEDULING_INFO *sched_info = get_scheduling_info_from_lcid(mac, lcid);
   int32_t lcid_remain_buffer = sched_info->LCID_buffer_remain;
@@ -3106,9 +3105,13 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
         lcid);
 
   // Pointer used to build the MAC sub-PDU headers in the ULSCH buffer for each SDU
-  NR_MAC_SUBHEADER_LONG *header = (NR_MAC_SUBHEADER_LONG *)(*pdu);
-
-  *pdu += sh_size;
+  uint8_t *header = *pdu;
+  const int32_t available = (int32_t)buflen - mac_ce_p->total_mac_pdu_header_len - mac_ce_p->sdu_length_total;
+  const uint32_t payload_budget = nr_mac_sdu_payload_capacity(available);
+  AssertFatal(payload_budget > 0, "No room for a positive MAC SDU\n");
+  const uint8_t reserved_sh_size = nr_mac_sdu_header_length(payload_budget);
+  *buflen_remain = payload_budget;
+  *pdu += reserved_sh_size;
 
   // number of bytes requested from RLC for each LCID
   long target = 0;
@@ -3132,6 +3135,7 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
               lcid,
               sdu_length,
               bytes_requested);
+  const uint8_t sh_size = nr_mac_sdu_header_length(sdu_length);
 
   // Decrement Bj by the total size of MAC SDUs(RLC PDU) served to logical channel
   // currently the Bj is drecremented by size of MAC SDus everytime it is served to logical channel, so by this approach there
@@ -3158,10 +3162,9 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
           lcid,
           buflen);
 
-    header->R = 0;
-    header->F = 1;
-    header->LCID = lcid;
-    header->L = htons(sdu_length);
+    /* TS 38.321 6.2.1: use the short length field below 256 bytes. */
+    nr_mac_sdu_write(header, lcid, sdu_length, reserved_sh_size);
+    *pdu = header + sh_size;
 
 #ifdef ENABLE_MAC_PAYLOAD_DEBUG
     LOG_I(NR_MAC, "dumping MAC sub-header with length %d: \n", sh_size);
@@ -3170,20 +3173,21 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
     log_dump(NR_MAC, *pdu, sdu_length, LOG_DUMP_CHAR, "\n");
 #endif
 
-    *pdu += sdu_length;
+    *pdu = header + sh_size + sdu_length;
     mac_ce_p->sdu_length_total += sdu_length;
     mac_ce_p->total_mac_pdu_header_len += sh_size;
 
     (*num_sdus)++;
   } else {
-    *pdu -= sh_size;
+    *pdu = header;
     lcids_data_status[lc_idx] = false;
     (*num_lcids_same_priority)--;
     LOG_D(NR_MAC, "No data to transmit for RB with LCID 0x%02x\n and hence set to false", lcid);
     return 0;
   }
 
-  *buflen_remain = buflen - (mac_ce_p->total_mac_pdu_header_len + mac_ce_p->sdu_length_total + sh_size);
+  *buflen_remain = nr_mac_sdu_payload_capacity((int32_t)buflen - mac_ce_p->total_mac_pdu_header_len
+                                              - mac_ce_p->sdu_length_total);
 
   // Update Buffer remain and BSR bytes after transmission
   NR_LCG_SCHEDULING_INFO *lcg_info = &mac->scheduling_info.lcg_sched_info[0];
@@ -3219,7 +3223,7 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
 /**
  * Function:      to fetch data to be transmitted from RLC, place it in the ULSCH PDU buffer
  to generate the complete MAC PDU with sub-headers and MAC CEs according to ULSCH MAC PDU generation (6.1.2 TS 38.321)
- the selected sub-header for the payload sub-PDUs is NR_MAC_SUBHEADER_LONG
+ the payload subheader length follows TS 38.321 6.2.1
  * @module_idP    Module ID
  * @CC_id         Component Carrier index
  * @frame         current UL frame
@@ -3318,7 +3322,8 @@ uint8_t nr_ue_get_sdu(NR_UE_MAC_INST_t *mac,
             get_count_lcids_same_priority(id, avail_lcids_count, lcids_bj_pos);
       }
 
-      buflen_remain = buflen - (mac_ce_p->total_mac_pdu_header_len + mac_ce_p->sdu_length_total + sh_size);
+      buflen_remain = nr_mac_sdu_payload_capacity((int32_t)buflen - mac_ce_p->total_mac_pdu_header_len
+                                                 - mac_ce_p->sdu_length_total);
 
       LOG_D(NR_MAC,
             "[UE %d] [%d.%d] UL-DXCH -> ULSCH, RLC with LCID 0x%02x (TBS %d bytes, sdu_length_total %d bytes, MAC header "
