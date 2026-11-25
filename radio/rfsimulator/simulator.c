@@ -37,6 +37,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stdatomic.h>
+#include <time.h>
 #include <errno.h>
 #include <stdint.h>
 #include <math.h>
@@ -118,6 +120,7 @@ typedef enum { SIMU_ROLE_SERVER = 1, SIMU_ROLE_CLIENT } simuRole;
     {"offset",                 "<channel offset in samps>\n",         simOpt,  .u64ptr=&(rfsimulator->chan_offset),    .defint64val=0,                   TYPE_UINT64,    0 },\
     {"prop_delay",             "<propagation delay in ms>\n",         simOpt,  .dblptr=&(rfsimulator->prop_delay_ms),  .defdblval=0.0,                   TYPE_DOUBLE,    0 },\
     {"wait_timeout",           "<wait timeout if no UE connected>\n", simOpt,  .iptr=&(rfsimulator->wait_timeout),     .defintval=1,                     TYPE_INT,       0 },\
+    {"sync_at_burst_end",      "<defer server client synchronization to a DL burst end, 0/1>\n", simOpt, .iptr=&(rfsimulator->sync_at_burst_end), .defintval=0, TYPE_INT, 0 },\
   };
 
 static void getset_currentchannels_type(char *buf, int debug, webdatadef_t *tdata, telnet_printfunc_t prnt);
@@ -155,6 +158,8 @@ typedef struct buffer_s {
   char *circularBufEnd;
   sample_t *circularBuf;
   channel_desc_t *channel_model;
+  atomic_bool pending_sync;
+  uint64_t pending_since_ns;
 } buffer_t;
 
 typedef struct {
@@ -178,6 +183,9 @@ typedef struct {
   void *telnetcmd_qid;
   poll_telnetcmdq_func_t poll_telnetcmdq;
   int wait_timeout;
+  int sync_at_burst_end;
+  int last_tx_burst;
+  int pending_clients;
   double prop_delay_ms;
   bool if_interference_enabled;
   double if_interference_center_hz;
@@ -279,8 +287,20 @@ static void add_if_interference(rfsimulator_state_t *state, void **samples, int 
   }
 }
 
+static uint64_t monotonic_time_ns(void)
+{
+  struct timespec now;
+  AssertFatal(clock_gettime(CLOCK_MONOTONIC, &now) == 0, "Failed to read monotonic clock\n");
+  return (uint64_t)now.tv_sec * UINT64_C(1000000000) + now.tv_nsec;
+}
+
 static int allocCirBuf(rfsimulator_state_t *bridge, int sock)
 {
+  if (sock < 0 || sock >= MAX_FD_RFSIMU) {
+    LOG_E(HW, "RFsim socket exceeds buffer index limit\n");
+    close(sock);
+    return -1;
+  }
   buffer_t *ptr=&bridge->buf[sock];
   ptr->circularBuf = calloc(1, sampleToByte(CirSize, 1));
   if (ptr->circularBuf == NULL) {
@@ -288,6 +308,8 @@ static int allocCirBuf(rfsimulator_state_t *bridge, int sock)
     return -1;
   }
   ptr->circularBufEnd=((char *)ptr->circularBuf)+sampleToByte(CirSize,1);
+  atomic_init(&ptr->pending_sync, bridge->role == SIMU_ROLE_SERVER && bridge->sync_at_burst_end);
+  ptr->pending_since_ns = atomic_load(&ptr->pending_sync) ? monotonic_time_ns() : 0;
   ptr->conn_sock=sock;
   ptr->lastReceivedTS=0;
   ptr->headerMode=true;
@@ -338,6 +360,8 @@ static int allocCirBuf(rfsimulator_state_t *bridge, int sock)
 }
 
 static void removeCirBuf(rfsimulator_state_t *bridge, int sock) {
+  if (atomic_load(&bridge->buf[sock].pending_sync))
+    bridge->pending_clients--;
   if (epoll_ctl(bridge->epollfd, EPOLL_CTL_DEL, sock, NULL) != 0) {
     LOG_E(HW, "epoll_ctl(EPOLL_CTL_DEL) failed\n");
   }
@@ -425,6 +449,8 @@ static void rfsimulator_readconfig(rfsimulator_state_t *rfsimulator) {
   int p = config_paramidx_fromname(rfsimu_params, sizeofArray(rfsimu_params), RFSIMU_OPTIONS_PARAMNAME);
   int ret = config_get(config_get_if(), rfsimu_params, sizeofArray(rfsimu_params), RFSIMU_SECTION);
   AssertFatal(ret >= 0, "configuration couldn't be performed\n");
+  AssertFatal(rfsimulator->sync_at_burst_end == 0 || rfsimulator->sync_at_burst_end == 1,
+              "rfsimulator.sync_at_burst_end must be 0 or 1\n");
 
   rfsimulator->saveIQfile = -1;
 
@@ -711,7 +737,7 @@ static int rfsimulator_write_internal(rfsimulator_state_t *t, openair0_timestamp
   for (int i = 0; i < MAX_FD_RFSIMU; i++) {
     buffer_t *b=&t->buf[i];
 
-    if (b->conn_sock >= 0 ) {
+    if (b->conn_sock >= 0 && !atomic_load(&b->pending_sync)) {
       samplesBlockHeader_t header = {nsamps, nbAnt, timestamp};
       fullwrite(b->conn_sock,&header, sizeof(header), t);
       sample_t tmpSamples[nsamps][nbAnt];
@@ -749,6 +775,8 @@ static int rfsimulator_write_internal(rfsimulator_state_t *t, openair0_timestamp
           timestamp - t->lastWroteTS);
 
   t->lastWroteTS=timestamp+nsamps;
+  // nr-ru.c packs the actual TX burst flag in the low four bits, GPIO above it.
+  t->last_tx_burst = flags & 0xf;
 
   if (!alreadyLocked)
     pthread_mutex_unlock(&Sockmutex);
@@ -760,6 +788,50 @@ static int rfsimulator_write_internal(rfsimulator_state_t *t, openair0_timestamp
         timestamp + nsamps,
         signal_energy(samplesVoid[0], nsamps));
   return nsamps;
+}
+
+// Called by the RX/event thread. A pending connection must not hold up virtual
+// RX time before the TX thread can reach the requested burst boundary.
+static void synchronize_pending_clients(rfsimulator_state_t *t)
+{
+  if (t->role != SIMU_ROLE_SERVER || !t->sync_at_burst_end || t->pending_clients == 0)
+    return;
+  pthread_mutex_lock(&Sockmutex);
+  const uint64_t now = monotonic_time_ns();
+  for (int fd = 0; fd < MAX_FD_RFSIMU; fd++) {
+    buffer_t *b = &t->buf[fd];
+    if (b->conn_sock < 0 || !atomic_load(&b->pending_sync))
+      continue;
+    if (now - b->pending_since_ns > 5000000000ULL) {
+      LOG_W(HW, "[RFsim sync] pending client timed out before a DL burst end, fd=%d\n", fd);
+      removeCirBuf(t, fd);
+      continue;
+    }
+    if (t->last_tx_burst != TX_BURST_END || t->lastWroteTS <= 1)
+      continue;
+    // Preserve the existing one-sample first-header format. Send only to this
+    // new client; do not replay a sync packet into already active UE streams.
+    const openair0_timestamp end = t->lastWroteTS;
+    samplesBlockHeader_t header = {1, t->tx_num_channels, end - 1};
+    sample_t zero[t->tx_num_channels];
+    memset(zero, 0, sizeof(zero));
+    fullwrite(fd, &header, sizeof(header), t);
+    fullwrite(fd, zero, sizeof(zero), t);
+    atomic_store(&b->pending_sync, false);
+    t->pending_clients--;
+    LOG_I(HW, "[RFsim sync] activated fd=%d burst=%d end=%lu marker=%lu rx=%lu pending_us=%lu\n",
+          fd, t->last_tx_burst, end, end - 1, t->nextRxTstamp,
+          (now - b->pending_since_ns) / 1000);
+  }
+  pthread_mutex_unlock(&Sockmutex);
+}
+
+static bool has_active_input(rfsimulator_state_t *t)
+{
+  for (int fd = 0; fd < MAX_FD_RFSIMU; fd++)
+    if (t->buf[fd].circularBuf && !atomic_load(&t->buf[fd].pending_sync))
+      return true;
+  return false;
 }
 
 static int rfsimulator_write(openair0_device *device, openair0_timestamp timestamp, void **samplesVoid, int nsamps, int nbAnt, int flags) {
@@ -799,9 +871,17 @@ static bool flushInput(rfsimulator_state_t *t, int timeout, int nsamps_for_initi
       if (allocCirBuf(t, conn_sock) == -1) {
         return false;
       }
+      nb_ue++;
+      if (atomic_load(&t->buf[conn_sock].pending_sync)) {
+        t->pending_clients++;
+        pthread_mutex_lock(&Sockmutex);
+        LOG_I(HW, "[RFsim sync] pending fd=%d accepted_end=%lu burst=%d rx=%lu\n",
+              conn_sock, t->lastWroteTS, t->last_tx_burst, t->nextRxTstamp);
+        pthread_mutex_unlock(&Sockmutex);
+        continue;
+      }
       LOG_I(HW, "A client connects, sending the current time\n");
       c16_t v= {0};
-      nb_ue++;
       void *samplesVoid[t->tx_num_channels];
 
       for ( int i=0; i < t->tx_num_channels; i++)
@@ -912,6 +992,7 @@ static bool flushInput(rfsimulator_state_t *t, int timeout, int nsamps_for_initi
     }
   }
 
+  synchronize_pending_clients(t);
   return nfds>0;
 }
 
@@ -925,7 +1006,7 @@ static int rfsimulator_read(openair0_device *device, openair0_timestamp *ptimest
   int first_sock;
 
   for (first_sock = 0; first_sock < MAX_FD_RFSIMU; first_sock++)
-    if (t->buf[first_sock].circularBuf != NULL )
+    if (t->buf[first_sock].circularBuf != NULL && !atomic_load(&t->buf[first_sock].pending_sync))
       break;
 
   if (first_sock == MAX_FD_RFSIMU) {
@@ -933,7 +1014,8 @@ static int rfsimulator_read(openair0_device *device, openair0_timestamp *ptimest
     if ( t->nextRxTstamp == 0)
       LOG_I(HW, "No connected device, generating void samples...\n");
 
-    if (!flushInput(t, t->wait_timeout,  nsamps)) {
+    bool input_event = flushInput(t, t->wait_timeout, nsamps);
+    if (t->sync_at_burst_end ? !has_active_input(t) : !input_event) {
       for (int x=0; x < nbAnt; x++)
         memset(samplesVoid[x],0,sampleToByte(nsamps,1));
 
@@ -945,7 +1027,10 @@ static int rfsimulator_read(openair0_device *device, openair0_timestamp *ptimest
       *ptimestamp = t->nextRxTstamp-nsamps;
       return nsamps;
     }
-  } else {
+  }
+  // Keep legacy first-accept behaviour when the option is off. In the opt-in
+  // mode, an activation during flushInput must satisfy the normal RX predicate.
+  if (first_sock != MAX_FD_RFSIMU || t->sync_at_burst_end) {
     bool have_to_wait;
 
     do {
@@ -955,7 +1040,7 @@ static int rfsimulator_read(openair0_device *device, openair0_timestamp *ptimest
       for (int sock = 0; sock < MAX_FD_RFSIMU; sock++) {
         b = &t->buf[sock];
 
-        if ( b->circularBuf )
+        if (b->circularBuf && !atomic_load(&b->pending_sync))
           if ( t->nextRxTstamp+nsamps > b->lastReceivedTS ) {
             have_to_wait=true;
             break;
@@ -980,7 +1065,7 @@ static int rfsimulator_read(openair0_device *device, openair0_timestamp *ptimest
   for (int sock = 0; sock < MAX_FD_RFSIMU; sock++) {
     buffer_t *ptr=&t->buf[sock];
 
-    if ( ptr->circularBuf ) {
+    if (ptr->circularBuf && !atomic_load(&ptr->pending_sync)) {
       bool reGenerateChannel=false;
 
       //fixme: when do we regenerate
