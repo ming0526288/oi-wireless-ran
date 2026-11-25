@@ -29,6 +29,10 @@
  */
 
 
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "LAYER2/NR_MAC_gNB/mac_proto.h"
 #include "executables/softmodem-common.h"
 #include "common/utils/nr/nr_common.h"
@@ -1744,6 +1748,149 @@ static int comparator(const void *p, const void *q) {
   return ((UEsched_t*)p)->coef < ((UEsched_t*)q)->coef;
 }
 
+static pthread_once_t ul_probe_policy_once = PTHREAD_ONCE_INIT;
+static bool defer_idle_ul_probes;
+
+static void init_ul_probe_policy(void)
+{
+  const char *policy = getenv("OAI_RESEARCH_PROBE_POLICY");
+  if (policy == NULL)
+    policy = "legacy";
+  AssertFatal(strcmp(policy, "legacy") == 0 || strcmp(policy, "residual") == 0,
+              "OAI_RESEARCH_PROBE_POLICY must be legacy or residual\n");
+  defer_idle_ul_probes = strcmp(policy, "residual") == 0;
+  LOG_I(NR_MAC, "[UL probe] policy=%s\n", policy);
+}
+
+static int find_residual_probe_rbs(const uint16_t *mask, int bwp_size, int min_rb, uint16_t symbols)
+{
+  if (min_rb <= 0 || symbols == 0)
+    return -1;
+
+  // Keep the same end boundary as the original minimum-grant allocator.
+  int consecutive = 0;
+  for (int rb = 0; rb + 1 < bwp_size; rb++) {
+    if ((mask[rb] & symbols) != symbols) {
+      consecutive = 0;
+      continue;
+    }
+    if (++consecutive == min_rb)
+      return rb - min_rb + 1;
+  }
+  return -1;
+}
+
+static bool allocate_minimum_ul_grant(gNB_MAC_INST *nrmac,
+                                      const NR_ServingCellConfigCommon_t *scc,
+                                      frame_t frame,
+                                      sub_frame_t slot,
+                                      NR_UE_info_t *UE,
+                                      uint16_t *rballoc_mask,
+                                      int *n_rb_sched,
+                                      bool residual)
+{
+  const int CC_id = 0;
+  const int min_rb = nrmac->min_grant_prb;
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+  NR_UE_UL_BWP_t *current_BWP = &UE->current_UL_BWP;
+  NR_sched_pusch_t *sched_pusch = &sched_ctrl->sched_pusch;
+  const uint16_t bwpSize = current_BWP->BWPSize;
+  int rbStart = 0;
+  /* Find a free CCE */
+  int CCEIndex = get_cce_index(nrmac,
+                               CC_id, slot, UE->rnti,
+                               &sched_ctrl->aggregation_level,
+                               sched_ctrl->search_space,
+                               sched_ctrl->coreset,
+                               &sched_ctrl->sched_pdcch,
+                               false);
+  if (CCEIndex < 0) {
+    if (!(frame % 2 == 0 && (slot == 1 || slot == 33)))
+      LOG_I(NR_MAC, "[UE %04x][%4d.%2d] no free CCE for UL DCI (BSR 0)\n", UE->rnti, frame, slot);
+    return false;
+  }
+
+  sched_pusch->nrOfLayers = sched_ctrl->srs_feedback.ul_ri + 1;
+  sched_pusch->time_domain_allocation = get_ul_tda(nrmac, scc, sched_pusch->frame, sched_pusch->slot);
+  sched_pusch->tda_info = get_ul_tda_info(current_BWP,
+                                          sched_ctrl->coreset->controlResourceSetId,
+                                          sched_ctrl->search_space->searchSpaceType->present,
+                                          TYPE_C_RNTI_,
+                                          sched_pusch->time_domain_allocation);
+  AssertFatal(sched_pusch->tda_info.valid_tda, "Invalid TDA from get_ul_tda_info\n");
+  sched_pusch->dmrs_info = get_ul_dmrs_params(scc,
+                                              current_BWP,
+                                              &sched_pusch->tda_info,
+                                              sched_pusch->nrOfLayers);
+
+  LOG_D(NR_MAC,"Looking for min_rb %d RBs, starting at %d num_dmrs_cdm_grps_no_data %d\n",
+        min_rb, rbStart, sched_pusch->dmrs_info.num_dmrs_cdm_grps_no_data);
+  const uint16_t slbitmap = SL_to_bitmap(sched_pusch->tda_info.startSymbolIndex, sched_pusch->tda_info.nrOfSymbols);
+  if (residual) {
+    rbStart = find_residual_probe_rbs(rballoc_mask, bwpSize, min_rb, slbitmap);
+  } else {
+    while (rbStart < bwpSize && (rballoc_mask[rbStart] & slbitmap) != slbitmap)
+      rbStart++;
+  }
+  if (rbStart < 0 || rbStart + min_rb >= bwpSize) {
+    LOG_I(NR_MAC, "[UE %04x][%4d.%2d] could not allocate continuous UL data: no resources (rbStart %d, min_rb %d, bwpSize %d)\n",
+          UE->rnti,
+          frame,
+          slot,
+          rbStart,
+          min_rb,
+          bwpSize);
+    return false;
+  }
+
+  sched_ctrl->cce_index = CCEIndex;
+  fill_pdcch_vrb_map(nrmac,
+                     CC_id,
+                     &sched_ctrl->sched_pdcch,
+                     CCEIndex,
+                     sched_ctrl->aggregation_level);
+
+  sched_pusch->mcs = min(nrmac->min_grant_mcs, sched_pusch->mcs);
+  update_ul_ue_R_Qm(sched_pusch->mcs, current_BWP->mcs_table, current_BWP->pusch_Config, &sched_pusch->R, &sched_pusch->Qm);
+  sched_pusch->rbStart = rbStart;
+  sched_pusch->rbSize = min_rb;
+  sched_pusch->tb_size = nr_compute_tbs(sched_pusch->Qm,
+                                        sched_pusch->R,
+                                        sched_pusch->rbSize,
+                                        sched_pusch->tda_info.nrOfSymbols,
+                                        sched_pusch->dmrs_info.N_PRB_DMRS * sched_pusch->dmrs_info.num_dmrs_symb,
+                                        0, // nb_rb_oh
+                                        0,
+                                        sched_pusch->nrOfLayers) >> 3;
+  long *deltaMCS = current_BWP->pusch_Config ? current_BWP->pusch_Config->pusch_PowerControl->deltaMCS : NULL;
+
+  sched_pusch->phr_txpower_calc = compute_ph_factor(current_BWP->scs,
+                                                    sched_pusch->tb_size << 3,
+                                                    sched_pusch->rbSize,
+                                                    sched_pusch->nrOfLayers,
+                                                    sched_pusch->tda_info.nrOfSymbols,
+                                                    sched_pusch->dmrs_info.N_PRB_DMRS * sched_pusch->dmrs_info.num_dmrs_symb,
+                                                    deltaMCS,
+                                                    false);
+  if (sched_pusch->mcs != 9)
+    LOG_D(NR_MAC,
+          "pf_ul %d.%d UE %x Scheduling PUSCH (no data) nrb %d mcs %d tbs %d bits phr_txpower %d\n",
+          frame,
+          slot,
+          UE->rnti,
+          sched_pusch->rbSize,
+          sched_pusch->mcs,
+          sched_pusch->tb_size << 3,
+          sched_pusch->phr_txpower_calc);
+
+  /* Mark the corresponding RBs as used */
+  *n_rb_sched -= sched_pusch->rbSize;
+  for (int rb = 0; rb < sched_ctrl->sched_pusch.rbSize; rb++)
+    rballoc_mask[rb + sched_ctrl->sched_pusch.rbStart] ^= slbitmap;
+
+  return true;
+}
+
 static void pf_ul(module_id_t module_id,
                   frame_t frame,
                   sub_frame_t slot,
@@ -1760,6 +1907,8 @@ static void pf_ul(module_id_t module_id,
   const int min_rb = nrmac->min_grant_prb;
   // UEs that could be scheduled
   UEsched_t UE_sched[MAX_MOBILES_PER_GNB] = {0};
+  NR_UE_info_t *deferred_probes[MAX_MOBILES_PER_GNB];
+  int deferred_count = 0;
   int remainUEs = max_num_ue;
   int curUE=0;
 
@@ -1772,9 +1921,6 @@ static void pf_ul(module_id_t module_id,
     LOG_D(NR_MAC,"pf_ul: preparing UL scheduling for UE %04x\n",UE->rnti);
     NR_UE_UL_BWP_t *current_BWP = &UE->current_UL_BWP;
 
-    int rbStart = 0; // wrt BWP start
-
-    const uint16_t bwpSize = current_BWP->BWPSize;
     NR_sched_pusch_t *sched_pusch = &sched_ctrl->sched_pusch;
     const NR_mac_dir_stats_t *stats = &UE->mac_stats.ul;
 
@@ -1840,103 +1986,13 @@ static void pf_ul(module_id_t module_id,
       LOG_D(NR_MAC,"%d.%d starting mcs %d bleri %f\n",frame,slot,sched_pusch->mcs,sched_ctrl->ul_bler_stats.bler);
     }
     //sched_pusch->mcs = 9; 
-    /* Schedule UE on SR or UL inactivity and no data (otherwise, will be scheduled
-     * based on data to transmit) */
+    /* Give an SR its minimum grant immediately. Pure idle probes can wait. */
     if (B == 0 && do_sched) {
-      /* if no data, pre-allocate 5RB */
-      /* Find a free CCE */
-      int CCEIndex = get_cce_index(nrmac,
-                                   CC_id, slot, UE->rnti,
-                                   &sched_ctrl->aggregation_level,
-                                   sched_ctrl->search_space,
-                                   sched_ctrl->coreset,
-                                   &sched_ctrl->sched_pdcch,
-                                   false);
-      if (CCEIndex<0) {
-        if (!(((frame%2) == 0) && ((slot == 1) || (slot == 33))))
-        LOG_I(NR_MAC, "[UE %04x][%4d.%2d] no free CCE for UL DCI (BSR 0)\n",
-              UE->rnti,
-              frame,
-              slot);
-        continue;
+      if (defer_idle_ul_probes && !sched_ctrl->SR) {
+        deferred_probes[deferred_count++] = UE;
+      } else if (allocate_minimum_ul_grant(nrmac, scc, frame, slot, UE, rballoc_mask, &n_rb_sched, false)) {
+        remainUEs--;
       }
-
-      sched_pusch->nrOfLayers = sched_ctrl->srs_feedback.ul_ri + 1;
-      sched_pusch->time_domain_allocation = get_ul_tda(nrmac, scc, sched_pusch->frame, sched_pusch->slot);
-      sched_pusch->tda_info = get_ul_tda_info(current_BWP,
-                                              sched_ctrl->coreset->controlResourceSetId,
-                                              sched_ctrl->search_space->searchSpaceType->present,
-                                              TYPE_C_RNTI_,
-                                              sched_pusch->time_domain_allocation);
-      AssertFatal(sched_pusch->tda_info.valid_tda, "Invalid TDA from get_ul_tda_info\n");
-      sched_pusch->dmrs_info = get_ul_dmrs_params(scc,
-                                                  current_BWP,
-                                                  &sched_pusch->tda_info,
-                                                  sched_pusch->nrOfLayers);
-
-      LOG_D(NR_MAC,"Looking for min_rb %d RBs, starting at %d num_dmrs_cdm_grps_no_data %d\n",
-            min_rb, rbStart, sched_pusch->dmrs_info.num_dmrs_cdm_grps_no_data);
-      const uint16_t slbitmap = SL_to_bitmap(sched_pusch->tda_info.startSymbolIndex, sched_pusch->tda_info.nrOfSymbols);
-      while (rbStart < bwpSize && (rballoc_mask[rbStart] & slbitmap) != slbitmap)
-        rbStart++;
-      if (rbStart + min_rb >= bwpSize) {
-        LOG_I(NR_MAC, "[UE %04x][%4d.%2d] could not allocate continuous UL data: no resources (rbStart %d, min_rb %d, bwpSize %d)\n",
-              UE->rnti,
-              frame,
-              slot,
-              rbStart,
-              min_rb,
-              bwpSize);
-        continue;
-      }
-
-      sched_ctrl->cce_index = CCEIndex;
-      fill_pdcch_vrb_map(nrmac,
-                         CC_id,
-                         &sched_ctrl->sched_pdcch,
-                         CCEIndex,
-                         sched_ctrl->aggregation_level);
-
-      NR_sched_pusch_t *sched_pusch = &sched_ctrl->sched_pusch;
-      sched_pusch->mcs = min(nrmac->min_grant_mcs, sched_pusch->mcs);
-      update_ul_ue_R_Qm(sched_pusch->mcs, current_BWP->mcs_table, current_BWP->pusch_Config, &sched_pusch->R, &sched_pusch->Qm);
-      sched_pusch->rbStart = rbStart;
-      sched_pusch->rbSize = min_rb;
-      sched_pusch->tb_size = nr_compute_tbs(sched_pusch->Qm,
-                                            sched_pusch->R,
-                                            sched_pusch->rbSize,
-                                            sched_pusch->tda_info.nrOfSymbols,
-                                            sched_pusch->dmrs_info.N_PRB_DMRS * sched_pusch->dmrs_info.num_dmrs_symb,
-                                            0, // nb_rb_oh
-                                            0,
-                                            sched_pusch->nrOfLayers) >> 3;
-      long *deltaMCS = current_BWP->pusch_Config ? current_BWP->pusch_Config->pusch_PowerControl->deltaMCS : NULL;
-
-      sched_pusch->phr_txpower_calc = compute_ph_factor(current_BWP->scs,
-                                                        sched_pusch->tb_size << 3,
-                                                        sched_pusch->rbSize,
-                                                        sched_pusch->nrOfLayers,
-                                                        sched_pusch->tda_info.nrOfSymbols,
-                                                        sched_pusch->dmrs_info.N_PRB_DMRS * sched_pusch->dmrs_info.num_dmrs_symb,
-                                                        deltaMCS,
-                                                        false);
-      if (sched_pusch->mcs != 9)
-      LOG_D(NR_MAC,
-            "pf_ul %d.%d UE %x Scheduling PUSCH (no data) nrb %d mcs %d tbs %d bits phr_txpower %d\n",
-            frame,
-            slot,
-            UE->rnti,
-            sched_pusch->rbSize,
-            sched_pusch->mcs,
-            sched_pusch->tb_size << 3,
-            sched_pusch->phr_txpower_calc);
-
-      /* Mark the corresponding RBs as used */
-      n_rb_sched -= sched_pusch->rbSize;
-      for (int rb = 0; rb < sched_ctrl->sched_pusch.rbSize; rb++)
-        rballoc_mask[rb + sched_ctrl->sched_pusch.rbStart] ^= slbitmap;
-
-      remainUEs--;
       continue;
     }
 
@@ -2084,6 +2140,11 @@ static void pf_ul(module_id_t module_id,
     remainUEs--;
     iterator++;
   }
+
+  for (int i = 0; i < deferred_count && remainUEs > 0 && n_rb_sched >= min_rb; ++i) {
+    if (allocate_minimum_ul_grant(nrmac, scc, frame, slot, deferred_probes[i], rballoc_mask, &n_rb_sched, true))
+      remainUEs--;
+  }
 }
 
 static bool nr_fr1_ulsch_preprocessor(module_id_t module_id, frame_t frame, sub_frame_t slot)
@@ -2193,6 +2254,7 @@ static bool nr_fr1_ulsch_preprocessor(module_id_t module_id, frame_t frame, sub_
 
 nr_pp_impl_ul nr_init_fr1_ulsch_preprocessor(int CC_id)
 {
+  pthread_once(&ul_probe_policy_once, init_ul_probe_policy);
   /* during initialization: no mutex needed */
   /* in the PF algorithm, we have to use the TBsize to compute the coefficient.
    * This would include the number of DMRS symbols, which in turn depends on
