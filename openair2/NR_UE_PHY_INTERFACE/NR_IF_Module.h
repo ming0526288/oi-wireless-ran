@@ -34,6 +34,7 @@
 #define __NR_IF_MODULE_H__
 
 #include "common/platform_types.h"
+#include <pthread.h>
 #include <semaphore.h>
 #include "fapi_nr_ue_interface.h"
 #include "openair2/PHY_INTERFACE/queue_t.h"
@@ -52,6 +53,9 @@ typedef enum sl_sidelink_slot_type {
 } sl_sidelink_slot_type_t;
 
 extern slot_rnti_mcs_s slot_rnti_mcs[NUM_NFAPI_SLOT];
+
+// Serialize RRC configuration with the normal UE MAC indication callbacks.
+extern pthread_mutex_t mac_IF_mutex;
 
 typedef struct NR_UL_TIME_ALIGNMENT NR_UL_TIME_ALIGNMENT_t;
 
