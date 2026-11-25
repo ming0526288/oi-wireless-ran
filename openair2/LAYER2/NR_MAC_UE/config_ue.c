@@ -1576,11 +1576,6 @@ void nr_rrc_mac_config_req_sib1(module_id_t module_id,
   NR_UE_MAC_INST_t *mac = get_mac_inst(module_id);
   AssertFatal(scc, "SIB1 SCC should not be NULL\n");
 
-  // The RRC task runs concurrently with normal UL/DL indication callbacks.
-  // Use their lock while swapping/releasing configuration owned by the MAC.
-  int lock_rc = pthread_mutex_lock(&mac_IF_mutex);
-  AssertFatal(!lock_rc, "MAC configuration lock failed %d\n", lock_rc);
-
   UPDATE_IE(mac->tdd_UL_DL_ConfigurationCommon, scc->tdd_UL_DL_ConfigurationCommon, NR_TDD_UL_DL_ConfigCommon_t);
   UPDATE_IE(mac->si_SchedulingInfo, si_SchedulingInfo, NR_SI_SchedulingInfo_t);
 
@@ -1607,8 +1602,6 @@ void nr_rrc_mac_config_req_sib1(module_id_t module_id,
   if (!get_softmodem_params()->emulate_l1)
     mac->if_module->phy_config_request(&mac->phy_config);
   mac->phy_config_request_sent = true;
-  lock_rc = pthread_mutex_unlock(&mac_IF_mutex);
-  AssertFatal(!lock_rc, "MAC configuration unlock failed %d\n", lock_rc);
 }
 
 void nr_rrc_mac_config_req_sib19_r17(module_id_t module_id,
@@ -2326,10 +2319,6 @@ void nr_rrc_mac_config_req_cg(module_id_t module_id,
 {
   LOG_I(MAC,"[UE %d] Applying CellGroupConfig from gNodeB\n", module_id);
   AssertFatal(cell_group_config, "CellGroupConfig should not be NULL\n");
-  // Protect the entire delta update, including existing entries and list
-  // reallocations, from the readers already using mac_IF_mutex.
-  int lock_rc = pthread_mutex_lock(&mac_IF_mutex);
-  AssertFatal(!lock_rc, "MAC configuration lock failed %d\n", lock_rc);
   NR_UE_MAC_INST_t *mac = get_mac_inst(module_id);
 
   if (cell_group_config->physicalCellGroupConfig)
@@ -2366,6 +2355,4 @@ void nr_rrc_mac_config_req_cg(module_id_t module_id,
 
   if (!mac->dl_config_request || !mac->ul_config_request)
     ue_init_config_request(mac, mac->current_DL_BWP->scs);
-  lock_rc = pthread_mutex_unlock(&mac_IF_mutex);
-  AssertFatal(!lock_rc, "MAC configuration unlock failed %d\n", lock_rc);
 }
