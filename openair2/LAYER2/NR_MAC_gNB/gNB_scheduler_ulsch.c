@@ -1762,18 +1762,9 @@ static void pf_ul(module_id_t module_id,
   UEsched_t UE_sched[MAX_MOBILES_PER_GNB] = {0};
   int remainUEs = max_num_ue;
   int curUE=0;
-  int cnt  = 0;
-
 
   /* Loop UE_list to calculate throughput and coeff */
   UE_iterator(UE_list, UE) {
-
-    //if (cnt == 2)
-    //{
-    //  LOG_I(PHY, " ~~~~~~~~~~~  curUE is 2\n");
-    //}
-    cnt++;
-
     NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
     if (UE->Msg4_ACKed != true || sched_ctrl->ul_failure)
       continue;
@@ -1841,8 +1832,6 @@ static void pf_ul(module_id_t module_id,
     
     if (external_ul_mcs_control_is_active()) {
       max_mcs = min(max_mcs, get_external_ul_max_mcs(frame, slot));
-    } else if (cnt == 1) {
-      max_mcs = 9;
     }
     if (bo->harq_round_max == 1)
       sched_pusch->mcs = max_mcs;
