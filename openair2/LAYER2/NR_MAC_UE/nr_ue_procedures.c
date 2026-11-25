@@ -203,8 +203,12 @@ void nr_ue_decode_mib(NR_UE_MAC_INST_t *mac, int cc_id)
   frame = frame << 4;
   mac->mib_frame = frame | frame_number_4lsb;
   if (mac->frequency_range == FR2) {
+    // TS 38.213 4.1 / TS 38.212 7.1.1: combine the three DM-RS LSBs
+    // with the three PBCH payload MSBs. Re-decoding must not accumulate them.
+    uint8_t ssb_index = mac->mib_ssb & 0x7;
     for (int i = 0; i < 3; i++)
-      mac->mib_ssb += (((extra_bits >> (7 - i)) & 0x01) << (3 + i));
+      ssb_index |= (((extra_bits >> (7 - i)) & 0x01) << (3 + i));
+    mac->mib_ssb = ssb_index;
   } else{
     if(ssb_subcarrier_offset_msb)
       ssb_subcarrier_offset = ssb_subcarrier_offset | 0x10;
