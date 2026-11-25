@@ -168,7 +168,16 @@ void e1_bearer_context_setup(const e1ap_bearer_setup_req_t *req)
 
     // GTP tunnel for N3/to core
     gtpv1u_gnb_create_tunnel_resp_t resp_n3 = {0};
-    int qfi = 0; // put PDU session marker
+    /* TS 38.415 5.4.2.1/5.5.2.2: mark the configured QoS flow on N3.
+     * This legacy tunnel stores one outgoing QFI, so refuse unsupported
+     * multi-flow input rather than silently marking every packet as zero.
+     */
+    AssertFatal(req_drb->numQosFlow2Setup == 1,
+                "Legacy N3 tunnel requires one QoS flow per DRB, got %d\n",
+                req_drb->numQosFlow2Setup);
+    int qfi = req_drb->qosFlows[0].qfi;
+    AssertFatal(qfi > 0 && qfi < 64, "Invalid assigned N3 QFI %d\n", qfi);
+    LOG_I(E1AP, "N3 UL tunnel uses configured QFI %d for DRB %ld\n", qfi, req_drb->id);
     int ret = drb_gtpu_create(n3inst,
                               cu_up_ue_id,
                               req_drb->id,
