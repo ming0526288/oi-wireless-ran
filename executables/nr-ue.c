@@ -479,9 +479,6 @@ static void RU_write(nr_rxtx_thread_data_t *rxtxD, bool sl_tx_action)
               rxtxD->writeBlockSize,
               tmp,
               flags);
- 
-  for (int i = 0; i < fp->nb_antennas_tx; i++)
-    memset(txp[i], 0, rxtxD->writeBlockSize*4);
 }
 
 void processSlotTX(void *arg)

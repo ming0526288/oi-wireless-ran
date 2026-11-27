@@ -196,6 +196,21 @@ static void writerEnqueue(re_order_t *ctx, openair0_timestamp timestamp, void **
   pthread_mutex_unlock(&ctx->mutex_store);
 }
 
+static void clear_write_samples(void **txp, int nsamps, int nbAnt)
+{
+  for (int i = 0; i < nbAnt; i++)
+    memset(txp[i], 0, nsamps * sizeof(int32_t));
+}
+
+static int writer_write_slot(openair0_device *device, openair0_timestamp timestamp, void **txp, int nsamps, int nbAnt, int flags)
+{
+  int written = nsamps;
+  if (flags || IS_SOFTMODEM_RFSIM)
+    written = device->trx_write_func(device, timestamp, txp, nsamps, nbAnt, flags);
+  clear_write_samples(txp, nsamps, nbAnt);
+  return written;
+}
+
 static void writerProcessWaitingQueue(openair0_device *device)
 {
   bool found = false;
@@ -217,11 +232,8 @@ static void writerProcessWaitingQueue(openair0_device *device)
         ctx->queue[i].active = false;
         pthread_mutex_unlock(&ctx->mutex_store);
         found = true;
-        if (flags || IS_SOFTMODEM_RFSIM) {
-          int wroteSamples = device->trx_write_func(device, timestamp, txp, nsamps, nbAnt, flags);
-          if (wroteSamples != nsamps)
-            LOG_E(HW, "Failed to write to rf\n");
-        }
+        if (writer_write_slot(device, timestamp, txp, nsamps, nbAnt, flags) != nsamps)
+          LOG_E(HW, "Failed to write to rf\n");
         ctx->nextTS += nsamps;
         pthread_mutex_lock(&ctx->mutex_store);
       }
@@ -230,7 +242,7 @@ static void writerProcessWaitingQueue(openair0_device *device)
   } while (found);
 }
 
-// We assume the data behind *txp are permanently allocated
+// The sample storage is permanently allocated and stays valid until the writer clears it.
 // When we will go further, we can remove all RC.xxx.txdata buffers in xNB, in UE
 // but to make zerocopy and agnostic design, we need to make a proper ring buffer with mutex protection
 // mutex (or atomic flags) will be mandatory because this out order system root cause is there are several writer threads
@@ -242,17 +254,19 @@ int openair0_write_reorder(openair0_device *device, openair0_timestamp timestamp
   LOG_D(HW, "received write order ts: %lu, nb samples %d, next ts %luflags %d\n", timestamp, nsamps, timestamp + nsamps, flags);
   if (!ctx->initDone) {
     ctx->nextTS = timestamp;
+    ctx->next_timestamp_valid = true;
     pthread_mutex_init(&ctx->mutex_write, NULL);
     pthread_mutex_init(&ctx->mutex_store, NULL);
     ctx->initDone = true;
   }
   if (pthread_mutex_trylock(&ctx->mutex_write) == 0) {
     // We have the write exclusivity
+    if (!ctx->next_timestamp_valid) {
+      ctx->nextTS = timestamp;
+      ctx->next_timestamp_valid = true;
+    }
     if (llabs(timestamp - ctx->nextTS) < MAX_GAP) { // We are writing in sequence of the previous write
-      if (flags || IS_SOFTMODEM_RFSIM)
-        wroteSamples = device->trx_write_func(device, timestamp, txp, nsamps, nbAnt, flags);
-      else
-        wroteSamples = nsamps;
+      wroteSamples = writer_write_slot(device, timestamp, txp, nsamps, nbAnt, flags);
       ctx->nextTS += nsamps;
 
     } else {
@@ -264,7 +278,8 @@ int openair0_write_reorder(openair0_device *device, openair0_timestamp timestamp
   }
   writerEnqueue(ctx, timestamp, txp, nsamps, nbAnt, flags);
   if (pthread_mutex_trylock(&ctx->mutex_write) == 0) {
-    writerProcessWaitingQueue(device);
+    if (ctx->next_timestamp_valid)
+      writerProcessWaitingQueue(device);
     pthread_mutex_unlock(&ctx->mutex_write);
   }
   return nsamps;
@@ -276,13 +291,15 @@ void openair0_write_reorder_clear_context(openair0_device *device)
   re_order_t *ctx = &device->reOrder;
   if (!ctx->initDone)
     return;
-  if (pthread_mutex_trylock(&ctx->mutex_write) == 0)
-    LOG_E(HW, "write_reorder_clear_context call while still writing on the device\n");
-  pthread_mutex_destroy(&ctx->mutex_write);
+  pthread_mutex_lock(&ctx->mutex_write);
   pthread_mutex_lock(&ctx->mutex_store);
-  for (int i = 0; i < WRITE_QUEUE_SZ; i++)
-    ctx->queue[i].active = false;
+  for (int i = 0; i < WRITE_QUEUE_SZ; i++) {
+    if (ctx->queue[i].active) {
+      clear_write_samples(ctx->queue[i].txp, ctx->queue[i].nsamps, ctx->queue[i].nbAnt);
+      ctx->queue[i].active = false;
+    }
+  }
+  ctx->next_timestamp_valid = false;
   pthread_mutex_unlock(&ctx->mutex_store);
-  pthread_mutex_destroy(&ctx->mutex_store);
-  ctx->initDone = false;
+  pthread_mutex_unlock(&ctx->mutex_write);
 }
