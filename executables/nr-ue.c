@@ -472,7 +472,13 @@ static void RU_write(nr_rxtx_thread_data_t *rxtxD, bool sl_tx_action)
   }
 
   int tmp = openair0_write_reorder(&UE->rfdevice, proc->timestamp_tx, txp, rxtxD->writeBlockSize, fp->nb_antennas_tx, flags);
-  AssertFatal(tmp == rxtxD->writeBlockSize, "");
+  AssertFatal(tmp == rxtxD->writeBlockSize,
+              "RF write length mismatch at %d.%d: expected=%d returned=%d flags=%d\n",
+              proc->frame_tx,
+              slot,
+              rxtxD->writeBlockSize,
+              tmp,
+              flags);
  
   for (int i = 0; i < fp->nb_antennas_tx; i++)
     memset(txp[i], 0, rxtxD->writeBlockSize*4);
@@ -592,6 +598,15 @@ void processSlotTX(void *arg)
   *msgData = newslot;
   pushNotifiedFIFO(UE->tx_resume_ind_fifo + newslot, newElt);
   RU_write(rxtxD, sl_tx_action);
+  const nfapi_nr_ue_pusch_pdu_t *pusch = &phy_data.ulsch.pusch_pdu;
+  if (pusch->rnti != 0)
+    LOG_D(NR_MAC_DCI,
+          "PUSCH RF write returned: rnti=%04x pusch=%d.%d harq=%u samples=%d\n",
+          pusch->rnti,
+          proc->frame_tx,
+          proc->nr_slot_tx,
+          pusch->pusch_data.harq_process_id,
+          rxtxD->writeBlockSize);
 }
 
 static int UE_dl_preprocessing(PHY_VARS_NR_UE *UE, const UE_nr_rxtx_proc_t *proc, int *tx_wait_for_dlsch, nr_phy_data_t *phy_data)

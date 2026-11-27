@@ -521,6 +521,15 @@ static int nr_ue_process_dci_ul_00(NR_UE_MAC_INST_t *mac,
   if (ret != 0)
     remove_ul_config_last_item(pdu);
   release_ul_config(pdu, false);
+  LOG_D(NR_MAC_DCI,
+        "UL grant configuration: rnti=%04x dci=%u.%d pusch=%u.%d harq=%u format=0_0 result=%d\n",
+        dci_ind->rnti,
+        frame,
+        slot,
+        frame_tx,
+        slot_tx,
+        dci->harq_pid,
+        ret);
   return ret;
 }
 
@@ -618,6 +627,15 @@ static int nr_ue_process_dci_ul_01(NR_UE_MAC_INST_t *mac,
   if (ret != 0)
     remove_ul_config_last_item(pdu);
   release_ul_config(pdu, false);
+  LOG_D(NR_MAC_DCI,
+        "UL grant configuration: rnti=%04x dci=%u.%d pusch=%u.%d harq=%u format=0_1 result=%d\n",
+        dci_ind->rnti,
+        frame,
+        slot,
+        frame_tx,
+        slot_tx,
+        dci->harq_pid,
+        ret);
   return ret;
 }
 
@@ -1381,12 +1399,18 @@ static int8_t nr_ue_process_dci(NR_UE_MAC_INST_t *mac,
 
   switch (format) {
     case NR_UL_DCI_FORMAT_0_0:
-      return nr_ue_process_dci_ul_00(mac, frame, slot, dci, dci_ind);
-      break;
-
-    case NR_UL_DCI_FORMAT_0_1:
+    case NR_UL_DCI_FORMAT_0_1: {
+      LOG_D(NR_MAC_DCI,
+            "UL grant received: rnti=%04x dci=%u.%d harq=%u format=%s\n",
+            dci_ind->rnti,
+            frame,
+            slot,
+            dci->harq_pid,
+            dci_formats[format]);
+      if (format == NR_UL_DCI_FORMAT_0_0)
+        return nr_ue_process_dci_ul_00(mac, frame, slot, dci, dci_ind);
       return nr_ue_process_dci_ul_01(mac, frame, slot, dci, dci_ind);
-      break;
+    }
 
     case NR_DL_DCI_FORMAT_1_0:
       return nr_ue_process_dci_dl_10(mac, frame, slot, dci, dci_ind);

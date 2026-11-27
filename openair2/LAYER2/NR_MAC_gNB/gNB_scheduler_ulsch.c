@@ -672,6 +672,16 @@ static void _nr_rx_sdu(const module_id_t gnb_mod_idP,
 
   const int current_rnti = rntiP;
   LOG_D(NR_MAC, "rx_sdu for rnti %04x\n", current_rnti);
+  LOG_D(NR_MAC_DCI,
+        "UL reception: rnti=%04x pusch=%u.%u harq=%d sdu=%d cqi_raw=%u rssi_raw=%u ta_raw=%u\n",
+        current_rnti,
+        frameP,
+        slotP,
+        harq_pid,
+        sduP != NULL,
+        ul_cqi,
+        rssi,
+        timing_advance);
   const int target_snrx10 = gNB_mac->pusch_target_snrx10;
   const int pusch_failure_thres = gNB_mac->pusch_failure_thres;
 
@@ -770,9 +780,17 @@ static void _nr_rx_sdu(const module_id_t gnb_mod_idP,
 
       if (!get_softmodem_params()->phy_test && UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt >= pusch_failure_thres) {
         LOG_W(NR_MAC,
-              "UE %04x: Detected UL Failure on PUSCH after %d PUSCH DTX, stopping scheduling\n",
+              "UE %04x: Detected UL Failure on PUSCH after %d PUSCH DTX, stopping scheduling "
+              "(pusch=%u.%u harq=%d cqi_raw=%u rssi_raw=%u ta_raw=%u pucch0_dtx_total=%u)\n",
               UE->rnti,
-              UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt);
+              UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt,
+              frameP,
+              slotP,
+              harq_pid,
+              ul_cqi,
+              rssi,
+              timing_advance,
+              UE->mac_stats.pucch0_DTX);
         nr_mac_trigger_ul_failure(&UE->UE_sched_ctrl, UE->current_UL_BWP.scs);
       }
     }
@@ -2603,6 +2621,17 @@ void nr_schedule_ulsch(module_id_t module_id, frame_t frame, sub_frame_t slot, n
                        coreset,
                        UE->pdsch_HARQ_ACK_Codebook,
                        nr_mac->cset0_bwp_size);
+
+    LOG_D(NR_MAC_DCI,
+          "UL grant built: rnti=%04x dci=%d.%d pusch=%d.%d harq=%d cce=%d round=%d\n",
+          rnti,
+          frame,
+          slot,
+          sched_pusch->frame,
+          sched_pusch->slot,
+          harq_id,
+          dci_pdu->CceIndex,
+          cur_harq->round);
 
     memset(sched_pusch, 0, sizeof(*sched_pusch));
   }
