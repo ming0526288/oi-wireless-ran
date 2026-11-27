@@ -20,6 +20,7 @@
  */
 
 #define _GNU_SOURCE // For pthread_setname_np
+#include <inttypes.h>
 #include <pthread.h>
 #include <openair1/PHY/impl_defs_top.h>
 #include "executables/nr-uesoftmodem.h"
@@ -598,12 +599,13 @@ void processSlotTX(void *arg)
   const nfapi_nr_ue_pusch_pdu_t *pusch = &phy_data.ulsch.pusch_pdu;
   if (pusch->rnti != 0)
     LOG_D(NR_MAC_DCI,
-          "PUSCH RF write returned: rnti=%04x pusch=%d.%d harq=%u samples=%d\n",
+          "PUSCH RF write returned: rnti=%04x pusch=%d.%d harq=%u samples=%d ts=%" PRId64 "\n",
           pusch->rnti,
           proc->frame_tx,
           proc->nr_slot_tx,
           pusch->pusch_data.harq_process_id,
-          rxtxD->writeBlockSize);
+          rxtxD->writeBlockSize,
+          proc->timestamp_tx);
 }
 
 static int UE_dl_preprocessing(PHY_VARS_NR_UE *UE, const UE_nr_rxtx_proc_t *proc, int *tx_wait_for_dlsch, nr_phy_data_t *phy_data)

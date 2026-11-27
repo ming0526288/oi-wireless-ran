@@ -875,7 +875,13 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx)
         pusch_vars->ulsch_noise_power[aarx] /= num_dmrs;
         pusch_vars->ulsch_noise_power_tot += pusch_vars->ulsch_noise_power[aarx];
       }
-      if (dB_fixed_x10(pusch_vars->ulsch_power_tot) < dB_fixed_x10(pusch_vars->ulsch_noise_power_tot) + gNB->pusch_thres) {
+      const int power_db10 = dB_fixed_x10(pusch_vars->ulsch_power_tot);
+      const int noise_db10 = dB_fixed_x10(pusch_vars->ulsch_noise_power_tot);
+      const bool dtx = power_db10 < noise_db10 + gNB->pusch_thres;
+      LOG_D(NR_MAC_DCI,
+            "PUSCH PHY: rnti=%04x pusch=%d.%d harq=%d dtx=%d power_db10=%d noise_db10=%d threshold_db10=%d\n",
+            ulsch->rnti, frame_rx, slot_rx, ulsch->harq_pid, dtx, power_db10, noise_db10, gNB->pusch_thres);
+      if (dtx) {
         NR_gNB_PHY_STATS_t *stats = get_phy_stats(gNB, ulsch->rnti);
 
         LOG_D(PHY,

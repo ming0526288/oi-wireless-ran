@@ -73,6 +73,8 @@ int32_t test_dpdkrf_read (openair0_device *device, openair0_timestamp *ptimestam
 VCD_SIGNAL_DUMPER_DUMP_FUNCTION_BY_NAME( VCD_SIGNAL_DUMPER_FUNCTIONS_TRX_READ_RF, 1 );
 	int32_t rr = trx_dpdkrf_read((uint8_t **)buff, nsamps, (uint64_t *)ptimestamp,cc);
 VCD_SIGNAL_DUMPER_DUMP_FUNCTION_BY_NAME( VCD_SIGNAL_DUMPER_FUNCTIONS_TRX_READ_RF, 0 );
+    if (rr != nsamps)
+      LOG_D(NR_PHY_DCI, "DPDKRF RX short: requested=%d returned=%d\n", nsamps, rr);
     return nsamps;
 
 }
@@ -118,7 +120,23 @@ int32_t test_dpdkrf_write (openair0_device *device,openair0_timestamp timestamp,
 		buff[i] = cache_tx[1];;
 	}
 
-	int32_t rr = trx_dpdkrf_write((uint8_t **)buff,nsamps, timestamp, cc);
+    const bool trace = g_log->log_component[NR_PHY_DCI].level >= OAILOG_DEBUG && cc > 0 && nsamps > 0;
+    const int count = nsamps < 32 ? nsamps : 32;
+    int nonzero = 0;
+    if (trace) {
+      // Sample the first antenna after scaling, before the device consumes the block.
+      const int16_t *iq = buff[0];
+      for (int i = 0; i < count; i++) {
+        const size_t offset = 2 * ((size_t)i * nsamps / count);
+        nonzero += iq[offset] != 0 || iq[offset + 1] != 0;
+      }
+    }
+    const int32_t written = trx_dpdkrf_write((uint8_t **)buff, nsamps, timestamp, cc);
+    if (trace) {
+      LOG_D(NR_PHY_DCI,
+            "DPDKRF TX: ts=%" PRId64 " requested=%d returned=%d nonzero=%d/%d\n",
+            timestamp, nsamps, written, nonzero, count);
+    }
 	return nsamps;
 }
 

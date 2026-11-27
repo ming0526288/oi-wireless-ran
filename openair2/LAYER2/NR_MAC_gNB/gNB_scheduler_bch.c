@@ -583,6 +583,9 @@ void schedule_nr_sib1(module_id_t module_idP,
        (type0_PDCCH_CSS_config->active == true)) {
 
       LOG_D(NR_MAC,"(%d.%d) SIB1 transmission: ssb_index %d\n", frameP, slotP, type0_PDCCH_CSS_config->ssb_index);
+      LOG_D(NR_MAC_DCI,
+            "SIB1 scheduled: frame=%d slot=%d ssb_index=%d\n",
+            frameP, slotP, type0_PDCCH_CSS_config->ssb_index);
 
       default_table_type_t table_type = get_default_table_type(type0_PDCCH_CSS_config->type0_pdcch_ss_mux_pattern);
       // assuming normal CP
