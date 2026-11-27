@@ -65,7 +65,7 @@ queue_t nr_dl_tti_req_queue;
 queue_t nr_tx_req_queue;
 queue_t nr_ul_dci_req_queue;
 queue_t nr_ul_tti_req_queue;
-pthread_mutex_t mac_IF_mutex;
+pthread_mutex_t mac_IF_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void save_pdsch_pdu_for_crnti(nfapi_nr_dl_tti_request_t *dl_tti_request);
 
 void nrue_init_standalone_socket(int tx_port, int rx_port)
@@ -1308,8 +1308,6 @@ nr_ue_if_module_t *nr_ue_if_module_init(uint32_t module_id)
     nr_ue_if_module_inst[module_id]->ul_indication = nr_ue_ul_indication;
     nr_ue_if_module_inst[module_id]->slot_indication = nr_ue_slot_indication;
   }
-  pthread_mutex_init(&mac_IF_mutex, NULL);
-
   return nr_ue_if_module_inst[module_id];
 }
 

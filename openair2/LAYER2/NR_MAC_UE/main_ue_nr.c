@@ -323,6 +323,8 @@ void free_rach_structures(NR_UE_MAC_INST_t *nr_mac, int bwp_id)
         free(nr_mac->prach_assoc_pattern[bwp_id].prach_conf_period_list[j].prach_occasion_slot_map[k][l].prach_occasion);
 
   free(nr_mac->ssb_list[bwp_id].tx_ssb);
+  memset(&nr_mac->ssb_list[bwp_id], 0, sizeof(nr_mac->ssb_list[bwp_id]));
+  memset(&nr_mac->prach_assoc_pattern[bwp_id], 0, sizeof(nr_mac->prach_assoc_pattern[bwp_id]));
 }
 
 void reset_ra(NR_UE_MAC_INST_t *nr_mac, bool free_prach)

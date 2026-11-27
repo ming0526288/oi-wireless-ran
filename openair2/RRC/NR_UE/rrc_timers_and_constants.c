@@ -115,7 +115,7 @@ void nr_rrc_SI_timers(NR_UE_RRC_SI_INFO *SInfo)
   }
 }
 
-void nr_rrc_handle_timers(NR_UE_RRC_INST_t *rrc)
+void nr_rrc_handle_timers(NR_UE_RRC_INST_t *rrc, int gnb_id)
 {
   NR_UE_Timers_Constants_t *timers = &rrc->timers_and_constants;
 
@@ -148,13 +148,8 @@ void nr_rrc_handle_timers(NR_UE_RRC_INST_t *rrc)
   }
 
   bool t310_expired = nr_timer_tick(&timers->T310);
-  if(t310_expired) {
-    LOG_W(NR_RRC, "Timer T310 expired\n");
-    // TODO
-    // handle detection of radio link failure
-    // as described in 5.3.10.3 of 38.331
-    AssertFatal(false, "Radio link failure! Not handled yet!\n");
-  }
+  if (t310_expired)
+    nr_rrc_handle_t310_expiry(rrc, gnb_id);
 
   bool t311_expired = nr_timer_tick(&timers->T311);
   if(t311_expired) {

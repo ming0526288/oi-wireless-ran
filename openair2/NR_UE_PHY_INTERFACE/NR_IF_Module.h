@@ -288,6 +288,9 @@ typedef struct nr_ue_if_module_s {
    \param module_id module id*/
 nr_ue_if_module_t *nr_ue_if_module_init(uint32_t module_id);
 
+/* Protects UE MAC slot processing and RRC updates to its active cell configuration. */
+extern pthread_mutex_t mac_IF_mutex;
+
 void nrue_init_standalone_socket(int tx_port, int rx_port);
 
 void *nrue_standalone_pnf_task(void *context);

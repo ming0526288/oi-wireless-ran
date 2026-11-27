@@ -1525,6 +1525,7 @@ static void configure_common_BWP_ul(NR_UE_MAC_INST_t *mac, int bwp_id, NR_BWP_Up
 void nr_rrc_mac_config_req_reset(module_id_t module_id,
                                  NR_UE_MAC_reset_cause_t cause)
 {
+  AssertFatal(pthread_mutex_lock(&mac_IF_mutex) == 0, "Unable to lock UE MAC configuration\n");
   NR_UE_MAC_INST_t *mac = get_mac_inst(module_id);
   fapi_nr_synch_request_t sync_req = {.target_Nid_cell = -1, .ssb_bw_scan = true};
   switch (cause) {
@@ -1562,6 +1563,7 @@ void nr_rrc_mac_config_req_reset(module_id_t module_id,
     default:
       AssertFatal(false, "Invalid MAC reset cause %d\n", cause);
   }
+  AssertFatal(pthread_mutex_unlock(&mac_IF_mutex) == 0, "Unable to unlock UE MAC configuration\n");
 }
 
 void nr_rrc_mac_config_req_sib1(module_id_t module_id,
@@ -1571,6 +1573,7 @@ void nr_rrc_mac_config_req_sib1(module_id_t module_id,
 {
   NR_UE_MAC_INST_t *mac = get_mac_inst(module_id);
   AssertFatal(scc, "SIB1 SCC should not be NULL\n");
+  AssertFatal(pthread_mutex_lock(&mac_IF_mutex) == 0, "Unable to lock UE MAC configuration\n");
 
   UPDATE_IE(mac->tdd_UL_DL_ConfigurationCommon, scc->tdd_UL_DL_ConfigurationCommon, NR_TDD_UL_DL_ConfigCommon_t);
   UPDATE_IE(mac->si_SchedulingInfo, si_SchedulingInfo, NR_SI_SchedulingInfo_t);
@@ -1598,6 +1601,7 @@ void nr_rrc_mac_config_req_sib1(module_id_t module_id,
   if (!get_softmodem_params()->emulate_l1)
     mac->if_module->phy_config_request(&mac->phy_config);
   mac->phy_config_request_sent = true;
+  AssertFatal(pthread_mutex_unlock(&mac_IF_mutex) == 0, "Unable to unlock UE MAC configuration\n");
 }
 
 void nr_rrc_mac_config_req_sib19_r17(module_id_t module_id,
@@ -2315,6 +2319,7 @@ void nr_rrc_mac_config_req_cg(module_id_t module_id,
 {
   LOG_I(MAC,"[UE %d] Applying CellGroupConfig from gNodeB\n", module_id);
   AssertFatal(cell_group_config, "CellGroupConfig should not be NULL\n");
+  AssertFatal(pthread_mutex_lock(&mac_IF_mutex) == 0, "Unable to lock UE MAC configuration\n");
   NR_UE_MAC_INST_t *mac = get_mac_inst(module_id);
 
   if (cell_group_config->physicalCellGroupConfig)
@@ -2351,4 +2356,5 @@ void nr_rrc_mac_config_req_cg(module_id_t module_id,
 
   if (!mac->dl_config_request || !mac->ul_config_request)
     ue_init_config_request(mac, mac->current_DL_BWP->scs);
+  AssertFatal(pthread_mutex_unlock(&mac_IF_mutex) == 0, "Unable to unlock UE MAC configuration\n");
 }

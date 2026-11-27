@@ -2018,6 +2018,8 @@ static int get_nr_prach_info_from_ssb_index(prach_association_pattern_t *prach_a
   prach_occasion_slot_t *prach_occasion_slot_p = NULL;
 
   *prach_occasion_info_pp = NULL;
+  if ((unsigned)ssb_idx >= MAX_NB_SSB || !ssb_list->tx_ssb || prach_assoc_pattern->nb_of_frame == 0)
+    return 0;
 
   // Search for a matching RO slot in the SSB_to_RO map
   // A valid RO slot will match:
@@ -2025,6 +2027,8 @@ static int get_nr_prach_info_from_ssb_index(prach_association_pattern_t *prach_a
   //      - exact slot number
   //      - frame offset
   int idx_list = ssb_list->nb_ssb_per_index[ssb_idx];
+  if (idx_list < 0 || idx_list >= ssb_list->nb_tx_ssb)
+    return 0;
   ssb_info_t *ssb_info_p = &ssb_list->tx_ssb[idx_list];
   LOG_D(NR_MAC, "checking for prach : ssb_info_p->nb_mapped_ro %d\n", ssb_info_p->nb_mapped_ro);
   for (int n_mapped_ro = 0; n_mapped_ro < ssb_info_p->nb_mapped_ro; n_mapped_ro++) {
@@ -2098,8 +2102,6 @@ void build_ssb_to_ro_map(NR_UE_MAC_INST_t *mac)
   // Clear all the lists and maps
   const int bwp_id = mac->current_UL_BWP->bwp_id;
   free_rach_structures(mac, bwp_id);
-  memset(&mac->ssb_list[bwp_id], 0, sizeof(ssb_list_info_t));
-  memset(&mac->prach_assoc_pattern[bwp_id], 0, sizeof(prach_association_pattern_t));
 
   // Build the list of all the valid RACH occasions in the maximum association pattern period according to the PRACH config
   LOG_D(NR_MAC,"Build RO list\n");
@@ -2589,6 +2591,8 @@ static void nr_ue_prach_scheduler(NR_UE_MAC_INST_t *mac, frame_t frameP, sub_fra
   fapi_nr_prach_config_t *prach_config = &cfg->prach_config;
 
   NR_RACH_ConfigCommon_t *setup = mac->current_UL_BWP->rach_ConfigCommon;
+  if (!setup)
+    return;
   NR_RACH_ConfigGeneric_t *rach_ConfigGeneric = &setup->rach_ConfigGeneric;
   const int bwp_id = mac->current_UL_BWP->bwp_id;
   NR_TDD_UL_DL_ConfigCommon_t *tdd_config = mac->tdd_UL_DL_ConfigurationCommon;

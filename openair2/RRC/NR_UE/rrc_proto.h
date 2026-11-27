@@ -96,7 +96,8 @@ void set_rlf_sib1_timers_and_constants(NR_UE_Timers_Constants_t *tac, NR_SIB1_t 
 void *rrc_nrue_task(void *args_p);
 void *rrc_nrue(void *args_p);
 
-void nr_rrc_handle_timers(NR_UE_RRC_INST_t *rrc);
+void nr_rrc_handle_timers(NR_UE_RRC_INST_t *rrc, int gnb_id);
+void nr_rrc_handle_t310_expiry(NR_UE_RRC_INST_t *rrc, int gnb_id);
 
 /**\brief RRC NSA UE task.
    \param void *args_p Pointer on arguments to start the task. */

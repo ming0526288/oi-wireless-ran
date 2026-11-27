@@ -1742,13 +1742,13 @@ void *rrc_nrue(void *notUsed)
     handle_rlf_sync(tac, sync_msg);
   } break;
 
-  case NRRRC_FRAME_PROCESS:
+  case NRRRC_FRAME_PROCESS: {
     LOG_D(NR_RRC, "Received %s: frame %d\n", ITTI_MSG_NAME(msg_p), NRRRC_FRAME_PROCESS(msg_p).frame);
     // increase the timers every 10ms (every new frame)
-    nr_rrc_handle_timers(rrc);
-    NR_UE_RRC_SI_INFO *SInfo = &rrc->perNB[NRRRC_FRAME_PROCESS(msg_p).gnb_id].SInfo;
-    nr_rrc_SI_timers(SInfo);
-    break;
+    int gnb_id = NRRRC_FRAME_PROCESS(msg_p).gnb_id;
+    nr_rrc_handle_timers(rrc, gnb_id);
+    nr_rrc_SI_timers(&rrc->perNB[gnb_id].SInfo);
+  } break;
 
   case NR_RRC_MAC_MSG3_IND:
     nr_rrc_handle_msg3_indication(rrc, NR_RRC_MAC_MSG3_IND(msg_p).rnti);
@@ -1955,6 +1955,28 @@ void nr_rrc_initiate_rrcReestablishment(NR_UE_RRC_INST_t *rrc,
   // release spCellConfig, if configured
   // perform cell selection in accordance with the cell selection process
   nr_rrc_mac_config_req_reset(rrc->ue_id, RE_ESTABLISHMENT);
+}
+
+void nr_rrc_handle_t310_expiry(NR_UE_RRC_INST_t *rrc, int gnb_id)
+{
+  if (!rrc->as_security_activated) {
+    LOG_W(NR_RRC, "Timer T310 expired, releasing RRC before AS security activation\n");
+    nr_rrc_going_to_IDLE(rrc, OTHER, NULL);
+    return;
+  }
+
+  if (rrc->Srb[2] == RB_ESTABLISHED) {
+    for (int drb_id = 1; drb_id <= MAX_DRBS_PER_UE; ++drb_id) {
+      if (get_DRB_status(rrc, drb_id) == RB_ESTABLISHED) {
+        LOG_W(NR_RRC, "Timer T310 expired, starting RRC re-establishment\n");
+        nr_rrc_initiate_rrcReestablishment(rrc, NR_ReestablishmentCause_otherFailure, gnb_id);
+        return;
+      }
+    }
+  }
+
+  LOG_W(NR_RRC, "Timer T310 expired, releasing RRC without established SRB2 and DRB\n");
+  nr_rrc_going_to_IDLE(rrc, RRC_CONNECTION_FAILURE, NULL);
 }
 
 static void nr_rrc_ue_generate_rrcReestablishmentComplete(const NR_UE_RRC_INST_t *rrc,
